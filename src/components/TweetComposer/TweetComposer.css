@@ -1,0 +1,104 @@
+.tweet-composer {
+  border-bottom: 1px solid var(--border-color);
+  padding: 12px 16px;
+}
+
+.tweet-composer__inner {
+  display: flex;
+  gap: 12px;
+}
+
+.tweet-composer__avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.tweet-composer__input-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.tweet-composer__textarea {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  padding: 12px 0;
+  line-height: 1.4;
+}
+
+.tweet-composer__textarea::placeholder {
+  color: var(--text-secondary);
+}
+
+.tweet-composer__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.tweet-composer--focused .tweet-composer__bottom {
+  border-top: 1px solid var(--border-color);
+}
+
+.tweet-composer__toolbar {
+  display: flex;
+  gap: 0;
+  margin-left: -8px;
+}
+
+.tweet-composer__tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: var(--accent-blue);
+  transition: background-color 0.2s;
+}
+
+.tweet-composer__tool-btn:hover {
+  background-color: rgba(29, 155, 240, 0.1);
+}
+
+.tweet-composer__post-btn {
+  padding: 8px 20px;
+  background-color: var(--accent-blue);
+  color: #fff;
+  border: none;
+  border-radius: 9999px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.tweet-composer__post-btn:hover {
+  background-color: var(--accent-blue-hover);
+}
+
+.tweet-composer__post-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 500px) {
+  .tweet-composer {
+    padding: 10px 12px;
+  }
+
+  .tweet-composer__textarea {
+    font-size: 17px;
+  }
+}

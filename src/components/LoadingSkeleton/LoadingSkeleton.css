@@ -1,0 +1,92 @@
+.skeleton-card {
+  border-bottom: 1px solid var(--border-color);
+  padding: 12px 16px;
+  animation: fadeIn 0.3s ease;
+}
+
+.skeleton-card__body {
+  display: flex;
+  gap: 12px;
+}
+
+/* Shimmer effect for all skeleton elements */
+.skeleton-card__avatar,
+.skeleton-card__name,
+.skeleton-card__handle,
+.skeleton-card__text-line,
+.skeleton-card__image,
+.skeleton-card__action {
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-base) 25%,
+    var(--skeleton-shine) 50%,
+    var(--skeleton-base) 75%
+  );
+  background-size: 200px 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+/* Avatar */
+.skeleton-card__avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.skeleton-card__content {
+  flex: 1;
+}
+
+/* Header */
+.skeleton-card__header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.skeleton-card__name {
+  width: 120px;
+  height: 14px;
+}
+
+.skeleton-card__handle {
+  width: 80px;
+  height: 14px;
+}
+
+/* Text Lines */
+.skeleton-card__text-line {
+  height: 14px;
+  margin-bottom: 8px;
+}
+
+.skeleton-card__text-line--full {
+  width: 100%;
+}
+
+.skeleton-card__text-line--partial {
+  width: 65%;
+}
+
+/* Image */
+.skeleton-card__image {
+  width: 100%;
+  height: 200px;
+  border-radius: 16px;
+  margin: 12px 0;
+}
+
+/* Actions */
+.skeleton-card__actions {
+  display: flex;
+  justify-content: space-between;
+  max-width: 425px;
+  margin-top: 8px;
+}
+
+.skeleton-card__action {
+  width: 40px;
+  height: 14px;
+}

@@ -1,0 +1,76 @@
+.notification-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 380px;
+}
+
+.notification-toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background-color: var(--accent-blue);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 14px;
+  animation: slideIn 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  min-width: 280px;
+}
+
+.notification-toast--exiting {
+  animation: slideOut 0.3s ease forwards;
+}
+
+.notification-toast--error {
+  background-color: #c0392b;
+}
+
+.notification-toast--like {
+  background-color: var(--accent-blue);
+}
+
+.notification-toast--follow {
+  background-color: var(--accent-blue);
+}
+
+.notification-toast__icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.notification-toast__message {
+  flex: 1;
+  line-height: 1.3;
+}
+
+.notification-toast__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.8);
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.notification-toast__close:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+@media (max-width: 500px) {
+  .notification-container {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    max-width: none;
+  }
+}

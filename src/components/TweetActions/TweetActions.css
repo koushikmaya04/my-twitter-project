@@ -1,0 +1,94 @@
+.tweet-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 425px;
+  margin-top: 4px;
+}
+
+.tweet-actions__btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 13px;
+  transition: color 0.2s;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.tweet-actions__icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+/* Comment hover */
+.tweet-actions__btn--comment:hover {
+  color: var(--accent-blue);
+}
+
+.tweet-actions__btn--comment:hover .tweet-actions__icon-wrapper {
+  background-color: rgba(29, 155, 240, 0.1);
+}
+
+/* Retweet hover */
+.tweet-actions__btn--retweet:hover {
+  color: var(--accent-green);
+}
+
+.tweet-actions__btn--retweet:hover .tweet-actions__icon-wrapper {
+  background-color: rgba(0, 186, 124, 0.1);
+}
+
+.tweet-actions__btn--retweeted {
+  color: var(--accent-green);
+}
+
+/* Like hover */
+.tweet-actions__btn--like:hover {
+  color: var(--accent-red);
+}
+
+.tweet-actions__btn--like:hover .tweet-actions__icon-wrapper {
+  background-color: rgba(249, 24, 128, 0.1);
+}
+
+.tweet-actions__btn--liked {
+  color: var(--accent-red);
+}
+
+/* Like animation */
+.tweet-actions__btn--liked .tweet-actions__icon-wrapper {
+  animation: likeHeart 0.3s ease-in-out;
+}
+
+@keyframes likeHeart {
+  0% { transform: scale(1); }
+  25% { transform: scale(1.3); }
+  50% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+/* Share hover */
+.tweet-actions__btn--share:hover {
+  color: var(--accent-blue);
+}
+
+.tweet-actions__btn--share:hover .tweet-actions__icon-wrapper {
+  background-color: rgba(29, 155, 240, 0.1);
+}
+
+.tweet-actions__count {
+  min-width: 1ch;
+  font-size: 13px;
+  line-height: 1;
+}

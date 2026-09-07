@@ -59,6 +59,21 @@ const Home = () => {
   const loadedIdsRef = useRef(new Set());
 
   /**
+   * Per-tweet operation ID maps for like and retweet.
+   *
+   * RACE CONDITION FIX: If the user clicks Like → Unlike rapidly, two async
+   * requests run concurrently. When the FIRST request eventually fails and tries
+   * to rollback, it must not overwrite the result of the SECOND (newer) click.
+   *
+   * HOW IT WORKS:
+   * - On each click, we increment a counter for that tweetId and capture the ID.
+   * - In the .catch handler, we compare the captured ID to the current latest.
+   * - If they differ, a newer action has occurred → we skip the stale rollback.
+   */
+  const likeOpIdRef = useRef(new Map());     // tweetId → latest like operation ID
+  const retweetOpIdRef = useRef(new Map()); // tweetId → latest retweet operation ID
+
+  /**
    * Combined posts: local posts first, then API posts.
    * This ensures user-created posts always appear at the top and
    * are never displaced by API pagination (Bug Fix #16).
@@ -172,6 +187,14 @@ const Home = () => {
     const wasLiked = previousPost.isLiked;
     const previousLikeCount = previousPost.likeCount;
 
+    // RACE CONDITION FIX: Assign a unique operation ID to THIS click.
+    // If the user clicks again before this request finishes, the Map entry
+    // for this tweetId is overwritten with a higher ID. In .catch we compare
+    // and skip the rollback if a newer operation has since taken over.
+    const prevOpId = likeOpIdRef.current.get(tweetId) ?? 0;
+    const myOpId = prevOpId + 1;
+    likeOpIdRef.current.set(tweetId, myOpId);
+
     // Step 2: OPTIMISTIC UPDATE — immediately toggle like on ONLY this tweet
     updatePostById(tweetId, (post) => ({
       ...post,
@@ -184,7 +207,7 @@ const Home = () => {
     // Step 3: Simulate API request in background
     simulateLikeRequest(tweetId)
       .then(() => {
-        // Step 4: SUCCESS — optimistic update stands
+        // Step 4: SUCCESS — optimistic update stands, emit notification
         eventEmitter.emit('like', {
           username: previousPost.author,
           tweetId: tweetId,
@@ -193,7 +216,11 @@ const Home = () => {
         });
       })
       .catch(() => {
-        // Step 5: FAILURE — ROLLBACK only this specific tweet
+        // Step 5: FAILURE — only rollback if NO newer click has occurred
+        if (likeOpIdRef.current.get(tweetId) !== myOpId) {
+          // A newer like/unlike action has since fired — skip stale rollback
+          return;
+        }
         updatePostById(tweetId, (post) => ({
           ...post,
           isLiked: wasLiked,
@@ -272,6 +299,14 @@ const Home = () => {
     const wasRetweeted = previousPost.isRetweeted;
     const previousRetweetCount = previousPost.retweetCount;
 
+    // RACE CONDITION FIX: Assign an operation ID to this click.
+    // If the user clicks retweet again before this request resolves,
+    // the Map entry is overwritten with a newer ID. The .catch checks
+    // the ID and skips rollback if a newer action has taken over.
+    const prevOpId = retweetOpIdRef.current.get(tweetId) ?? 0;
+    const myOpId = prevOpId + 1;
+    retweetOpIdRef.current.set(tweetId, myOpId);
+
     updatePostById(tweetId, (post) => ({
       ...post,
       isRetweeted: !post.isRetweeted,
@@ -301,7 +336,10 @@ const Home = () => {
         });
       })
       .catch(() => {
-        // Rollback only this tweet
+        // Only rollback if no newer retweet action has since fired for this tweet
+        if (retweetOpIdRef.current.get(tweetId) !== myOpId) {
+          return;
+        }
         updatePostById(tweetId, (post) => ({
           ...post,
           isRetweeted: wasRetweeted,

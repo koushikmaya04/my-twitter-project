@@ -101,8 +101,10 @@ const Feed = ({
         </div>
       )}
 
-      {/* Infinite Scroll Sentinel — observed by IntersectionObserver */}
-      {hasMore && !error && (
+      {/* Infinite Scroll Sentinel — observed by IntersectionObserver.
+          Hidden when search is active: the filtered result may be empty,
+          which would leave the sentinel visible and cause a runaway fetch loop. */}
+      {hasMore && !error && !searchQuery && (
         <div ref={sentinelRef} className="feed__sentinel" aria-hidden="true" />
       )}
 

@@ -95,7 +95,7 @@ const Sidebar = ({ onNavigate, activeItem = 'home' }) => {
       <div className="sidebar__inner">
         {/* X Logo */}
         <div className="sidebar__logo">
-          <a href="#" className="sidebar__logo-link">
+          <a href="#" className="sidebar__logo-link" aria-label="X">
             <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
               <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
             </svg>
@@ -109,6 +109,7 @@ const Sidebar = ({ onNavigate, activeItem = 'home' }) => {
               key={item.id}
               href="#"
               className={`sidebar__nav-item ${activeItem === item.id ? 'sidebar__nav-item--active' : ''}`}
+              aria-label={item.label}
               onClick={(e) => {
                 e.preventDefault();
                 onNavigate?.(item.id);
@@ -121,7 +122,7 @@ const Sidebar = ({ onNavigate, activeItem = 'home' }) => {
         </nav>
 
         {/* Post Button */}
-        <button className="sidebar__post-btn" onClick={() => onNavigate?.('compose')}>
+        <button className="sidebar__post-btn" onClick={() => onNavigate?.('compose')} aria-label="Post">
           <span className="sidebar__post-btn-text">Post</span>
           <span className="sidebar__post-btn-icon">
             <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">

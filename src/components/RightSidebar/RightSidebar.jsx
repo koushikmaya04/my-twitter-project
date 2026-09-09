@@ -35,7 +35,7 @@ const RightSidebar = ({ onSearch }) => {
         <a href="#">Accessibility</a>
         <a href="#">Ads info</a>
         <a href="#">More</a>
-        <span>© 2024 X Corp.</span>
+        <span>© 2026 X Corp.</span>
       </div>
     </aside>
   );

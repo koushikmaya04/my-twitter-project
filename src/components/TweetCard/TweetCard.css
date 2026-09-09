@@ -145,6 +145,7 @@
   border: 1px solid var(--border-color);
   aspect-ratio: 16 / 9;
   background-color: var(--bg-secondary);
+  cursor: pointer;
 }
 
 .tweet-card__image {

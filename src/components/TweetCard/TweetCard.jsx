@@ -1,6 +1,7 @@
 import React, { useState, useCallback, memo } from 'react';
 import TweetActions from '../TweetActions/TweetActions.jsx';
 import CommentSection from '../CommentSection/CommentSection.jsx';
+import ImageModal from '../ImageModal/ImageModal.jsx';
 import { useLazyImages } from '../../hooks/useLazyImages.js';
 import './TweetCard.css';
 
@@ -15,6 +16,7 @@ import './TweetCard.css';
  */
 const TweetCard = memo(({ tweet, onLike, onRetweet, onComment, onFollow, isFollowing, currentUser }) => {
   const [showComments, setShowComments] = useState(false);
+  const [isImageOpen, setIsImageOpen] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const { imgRef, src: imageSrc, isLoaded: imageLoaded, hasError: imageError } = useLazyImages(
     tweet.thumbnailUrl,
@@ -23,6 +25,15 @@ const TweetCard = memo(({ tweet, onLike, onRetweet, onComment, onFollow, isFollo
 
   const handleToggleComments = useCallback(() => {
     setShowComments((prev) => !prev);
+  }, []);
+
+  const handleImageClick = useCallback((e) => {
+    e.stopPropagation();
+    setIsImageOpen(true);
+  }, []);
+
+  const handleCloseImage = useCallback(() => {
+    setIsImageOpen(false);
   }, []);
 
   /**
@@ -117,7 +128,20 @@ const TweetCard = memo(({ tweet, onLike, onRetweet, onComment, onFollow, isFollo
 
           {/* Tweet image (lazy loaded) — Bug Fix #11: graceful fallback */}
           {tweet.imageUrl && !imageFailed && (
-            <div className="tweet-card__image-container" ref={imgRef}>
+            <div
+              className="tweet-card__image-container"
+              ref={imgRef}
+              onClick={handleImageClick}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handleImageClick(e);
+                }
+              }}
+              aria-label="View image in full screen"
+            >
               <img
                 className={`tweet-card__image ${imageLoaded ? 'tweet-card__image--loaded' : ''}`}
                 src={imageSrc}
@@ -163,6 +187,20 @@ const TweetCard = memo(({ tweet, onLike, onRetweet, onComment, onFollow, isFollo
           )}
         </div>
       </div>
+
+      {/* Image Lightbox / Modal */}
+      {isImageOpen && (
+        <ImageModal
+          tweet={tweet}
+          onClose={handleCloseImage}
+          onLike={onLike}
+          onRetweet={onRetweet}
+          onComment={onComment}
+          onToggleComments={handleToggleComments}
+          showComments={showComments}
+          commentCount={tweet.commentCount}
+        />
+      )}
     </article>
   );
 });

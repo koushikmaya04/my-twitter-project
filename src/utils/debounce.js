@@ -51,3 +51,7 @@ export function debounce(fn, delay = 300) {
 }
 
 export default debounce;
+ 
+
+
+// em ledu simple mannam pampina  request 0.3 sec lopala vere request oste ah patha request override iyytadi

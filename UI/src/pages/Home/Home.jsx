@@ -44,7 +44,7 @@ const Home = () => {
   const [hasMore, setHasMore] = useState(true);
 
   // Use refs for pagination state to prevent IntersectionObserver from reconnecting
-  const pageRef = useRef(1);
+  const cursorRef = useRef(null);
   const isFetchingRef = useRef(false);
 
   // ─── UI State ────────────────────────────────────────────────
@@ -91,8 +91,11 @@ const Home = () => {
     setError(null);
 
     try {
-      const { posts: newPosts, hasMore: more } = await fetchPosts(pageRef.current, 10);
-
+     const {
+  posts: newPosts,
+  nextCursor,
+  hasMore: more,
+} = await fetchPosts(cursorRef.current, 10);
       /**
        * DE-DUPLICATION (Bug Fix #15): Filter out any posts whose IDs
        * we've already loaded. IntersectionObserver may fire multiple times,
@@ -109,9 +112,7 @@ const Home = () => {
         setApiPosts((prev) => [...prev, ...uniqueNewPosts]);
       }
       setHasMore(more);
-      if (more) {
-        pageRef.current += 1;
-      }
+    cursorRef.current = nextCursor;
     } catch (err) {
       setError(err.message || 'Failed to load posts');
     } finally {

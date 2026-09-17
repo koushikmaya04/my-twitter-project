@@ -86,6 +86,7 @@ FROM likes;
 --
 -- Therefore a second insert must be rejected by likes_pk.
 
+BEGIN;
 
 INSERT INTO likes (
     user_id,

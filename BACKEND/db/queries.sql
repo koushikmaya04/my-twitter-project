@@ -57,7 +57,10 @@ LIMIT 11;
 -- Example cursor from the seeded page boundary:
 -- $1 = '2026-09-01T09:52:00.000Z'
 -- $2 = '11111111-1111-4111-8111-111111111120'
-
+ 
+-- '2026-09-01 15:22:00+05:30'::timestamptz,
+--       '11111111-1111-4111-8111-111111111120'::uuid
+  
 SELECT
     p.id,
     p.author_id,
@@ -117,6 +120,7 @@ JOIN users u
     ON u.id = p.author_id
 WHERE p.id = $1::uuid;
 
+-- 11111111-1111-4111-8111-111111111122 use as uuid
 
 -- ============================================================
 -- 3. DIRECT REPLIES
@@ -195,6 +199,8 @@ LIMIT 11;
 -- 4A. First page
 --
 -- $1 = user ID
+ 
+--  use uuid-'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
 SELECT
     pm.id,
@@ -258,7 +264,38 @@ ORDER BY
     pm.position ASC
 LIMIT 11;
 
-
+-- SELECT
+--     pm.id,
+--     pm.post_id,
+--     p.created_at,
+--     pm.position,
+--     pm.alt_text,
+--     pm.width,
+--     pm.height,
+--     pm.small_url,
+--     pm.large_url
+-- FROM post_media pm
+-- JOIN posts p
+--     ON p.id = pm.post_id
+-- WHERE p.author_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid
+--   AND p.kind = 'original'
+--   AND (
+--         p.created_at < '2026-09-01 15:25:00+05:30'::timestamptz
+--         OR (
+--             p.created_at = '2026-09-01 15:25:00+05:30'::timestamptz
+--             AND p.id < '11111111-1111-4111-8111-111111111117'::uuid
+--         )
+--         OR (
+--             p.created_at = '2026-09-01 15:25:00+05:30'::timestamptz
+--             AND p.id = '11111111-1111-4111-8111-111111111117'::uuid
+--             AND pm.position > 0
+--         )
+--       )
+-- ORDER BY
+--     p.created_at DESC,
+--     p.id DESC,
+--     pm.position ASC
+-- LIMIT 11;
 -- ============================================================
 -- 5. PROFILE STATISTICS
 -- ============================================================
@@ -297,7 +334,7 @@ SELECT
 FROM users u
 WHERE u.id = $1::uuid;
 
-
+-- 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' asha profile
 -- ============================================================
 -- 6. LIKE TOTALS FOR A BATCH OF POSTS
 -- ============================================================
@@ -338,7 +375,7 @@ ORDER BY post_ids.post_id;
 --
 -- $1 = viewer user ID
 -- ============================================================
-
+--schecks if a specified id liked these posts or not
 SELECT
     post_ids.post_id,
     EXISTS (
@@ -425,6 +462,7 @@ WHERE p.kind = 'original'
 ORDER BY p.created_at DESC, p.id DESC
 LIMIT 11;
 
+--here $2 and $3 are the timestampz and uuid of output of last row  
 
 -- ============================================================
 -- 9. TEXT SEARCH
@@ -477,6 +515,7 @@ WHERE p.kind IN ('original', 'reply')
 ORDER BY p.created_at DESC, p.id DESC
 LIMIT 11;
 
+--search for text in posts like-- database word 
 
 -- 9B. Search continuation page
 --
@@ -661,7 +700,7 @@ WHERE follower_id = $1::uuid
 --    11th row to determine whether another page exists.
 --
 -- 3. The home/following feeds select posts before joining
---    additional one-to-many data.
+--    additional one-to-many data. 
 --
 -- 4. Counts use separate aggregate/subqueries so that likes,
 --    replies and media do not multiply each other.

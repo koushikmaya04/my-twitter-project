@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { FeedService } from './feed.service';
+import type { ConfigService } from '@nestjs/config';
 
 import type {
   PaginatedResult,
@@ -15,30 +16,33 @@ describe('FeedService', () => {
       hasMore: true,
     };
 
-    const getFeed = jest
-      .fn<SocialFeedRepository['getFeed']>()
+    const mockConfigService = {
+      getOrThrow: jest
+        .fn<ConfigService['getOrThrow']>()
+        .mockReturnValue('demo-user-id'),
+    } as unknown as ConfigService;
+
+    const listOriginalFeed = jest
+      .fn<SocialFeedRepository['listOriginalFeed']>()
       .mockResolvedValue(fakeResult);
 
-    const getPostById = jest
-      .fn<SocialFeedRepository['getPostById']>()
-      .mockResolvedValue(null);
+    const fakeRepository = {
+      listOriginalFeed,
+    } as unknown as SocialFeedRepository;
 
-    const getUserById = jest
-      .fn<SocialFeedRepository['getUserById']>()
-      .mockResolvedValue(null);
-
-    const fakeRepository: SocialFeedRepository = {
-      getFeed,
-      getPostById,
-      getUserById,
-    };
-
-    const service = new FeedService(fakeRepository);
+    const service = new FeedService(
+      mockConfigService,
+      fakeRepository,
+    );
 
     const result = await service.getFeed(null, 10);
 
     expect(result).toEqual(fakeResult);
 
-    expect(getFeed).toHaveBeenCalledWith(null, 10);
+    expect(listOriginalFeed).toHaveBeenCalledWith(
+      null,
+      10,
+      'demo-user-id',
+    );
   });
 });

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 
 import type { Request, Response } from 'express';
+import { DomainError } from './domain-errors';
 
 interface RequestWithId extends Request {
   requestId?: string;
@@ -41,7 +42,11 @@ export class HttpExceptionFilter
     let message = 'Internal server error';
     let details: unknown[] = [];
 
-    if (exception instanceof HttpException) {
+    if (exception instanceof DomainError) {
+      status = exception.statusCode;
+      code = exception.code;
+      message = exception.message;
+    } else if (exception instanceof HttpException) {
       status = exception.getStatus();
 
       const exceptionResponse =
@@ -79,6 +84,10 @@ export class HttpExceptionFilter
         status === HttpStatus.CONFLICT
       ) {
         code = 'CONFLICT';
+      } else if (
+        status === HttpStatus.UNPROCESSABLE_ENTITY
+      ) {
+        code = 'INVALID_TARGET';
       } else if (
         status === HttpStatus.SERVICE_UNAVAILABLE
       ) {

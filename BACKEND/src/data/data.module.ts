@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
-import { FixtureSocialFeedRepository } from './repository/fixture-social-feed.repository';
 import { SOCIAL_FEED_REPOSITORY } from './repository/social-feed.repository.token';
 import { SOCIAL_FEED_READ_FAILURE } from './repository/social-feed-read-failure.token';
+import { DrizzleSocialFeedRepository } from './repository/drizzle-social-feed.repository';
 
 @Module({
   providers: [
     {
       provide: SOCIAL_FEED_REPOSITORY,
-      useClass: FixtureSocialFeedRepository,
+      useClass: DrizzleSocialFeedRepository,
     },
   {
   provide: SOCIAL_FEED_READ_FAILURE,

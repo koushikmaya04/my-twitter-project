@@ -65,48 +65,83 @@ export async function fetchPosts(cursor = null, limit = 10) {
 }
 
 /**
- * Simulate a like API request.
- *
- * These action methods remain unchanged for now.
+ * Persisted like API request.
+ * Sends desiredState to the backend and updates PostgreSQL.
  */
-export function simulateLikeRequest(tweetId) {
-  return new Promise((resolve, reject) => {
-    const delay = Math.random() * 600 + 200;
+export async function simulateLikeRequest(tweetId, desiredState = true) {
+  const response = await fetch(`${BASE_URL}/posts/${tweetId}/like`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ desiredState }),
+  });
 
-    setTimeout(() => {
-      if (Math.random() < 0.85) {
-        resolve({ success: true, tweetId });
-      } else {
-        reject(new Error('Failed to like post. Please try again.'));
+  if (!response.ok) {
+    let message = `API Error: ${response.status}`;
+
+    try {
+      const errorBody = await response.json();
+      if (errorBody?.error?.message) {
+        message = errorBody.error.message;
       }
-    }, delay);
+    } catch {
+      // Keep generic message
+    }
+
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
+/**
+ * Create a new post (original, reply, or repost) in PostgreSQL.
+ */
+export async function createPostRequest({
+  kind = 'original',
+  text = null,
+  replyToId = null,
+  repostOfId = null,
+}) {
+  const response = await fetch(`${BASE_URL}/posts`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ kind, text, replyToId, repostOfId }),
+  });
+
+  if (!response.ok) {
+    let message = `API Error: ${response.status}`;
+
+    try {
+      const errorBody = await response.json();
+      if (errorBody?.error?.message) {
+        message = errorBody.error.message;
+      }
+    } catch {
+      // Keep generic message
+    }
+
+    throw new Error(message);
+  }
+
+  const data = await response.json();
+  return data.item ?? data;
+}
+
+export async function simulateCommentRequest(tweetId, commentText) {
+  return createPostRequest({
+    kind: 'reply',
+    replyToId: tweetId,
+    text: commentText,
   });
 }
 
-export function simulateCommentRequest(tweetId, commentText) {
-  return new Promise((resolve, reject) => {
-    const delay = Math.random() * 500 + 200;
-
-    setTimeout(() => {
-      if (Math.random() < 0.9) {
-        resolve({ success: true, tweetId, commentText });
-      } else {
-        reject(new Error('Failed to post comment. Please try again.'));
-      }
-    }, delay);
-  });
-}
-
-export function simulateRetweetRequest(tweetId) {
-  return new Promise((resolve, reject) => {
-    const delay = Math.random() * 500 + 200;
-
-    setTimeout(() => {
-      if (Math.random() < 0.9) {
-        resolve({ success: true, tweetId });
-      } else {
-        reject(new Error('Failed to repost. Please try again.'));
-      }
-    }, delay);
+export async function simulateRetweetRequest(tweetId) {
+  return createPostRequest({
+    kind: 'repost',
+    repostOfId: tweetId,
   });
 }

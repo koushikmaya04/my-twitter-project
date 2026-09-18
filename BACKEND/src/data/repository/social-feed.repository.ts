@@ -1,12 +1,59 @@
+export interface CreatePostCommand {
+  authorId: string;
+  kind: 'original' | 'reply' | 'repost';
+  text?: string;
+  replyToId?: string;
+  repostOfId?: string;
+}
+
 export interface SocialFeedRepository {
-  getFeed(
+  listOriginalFeed(
     cursor: string | null,
     limit: number,
+    viewerId: string,
   ): Promise<PaginatedResult<PostRecord>>;
 
-  getPostById(id: string): Promise<PostRecord | null>;
+  getPostById(
+    id: string,
+    viewerId: string,
+  ): Promise<PostRecord | null>;
 
-  getUserById(id: string): Promise<UserRecord | null>;
+  getUserById(
+    id: string,
+  ): Promise<UserRecord | null>;
+
+  listReplies(
+    postId: string,
+    cursor: string | null,
+    limit: number,
+    viewerId: string,
+  ): Promise<PaginatedResult<PostRecord>>;
+
+  listProfileMedia(
+    userId: string,
+    cursor: string | null,
+    limit: number,
+  ): Promise<PaginatedResult<MediaRecord>>;
+
+  searchOriginals(
+    query: string,
+    cursor: string | null,
+    limit: number,
+    viewerId: string,
+  ): Promise<PaginatedResult<PostRecord>>;
+
+  createPost(
+    command: CreatePostCommand,
+  ): Promise<PostRecord>;
+
+  setLike(
+    postId: string,
+    viewerId: string,
+    desiredState: boolean,
+  ): Promise<{
+    likedByViewer: boolean;
+    likeCount: number;
+  }>;
 }
 
 export interface PaginatedResult<T> {
@@ -20,6 +67,7 @@ export interface PostRecord {
   kind: 'original' | 'reply' | 'repost';
   text: string | null;
   createdAt: string;
+
   author: {
     id: string;
     handle: string;
@@ -29,10 +77,13 @@ export interface PostRecord {
       largeUrl: string;
     };
   };
+
   media: MediaRecord[];
+
   likeCount: number;
   replyCount: number;
   likedByViewer: boolean;
+
   replyToId: string | null;
   repostOfId: string | null;
 }
@@ -52,10 +103,12 @@ export interface UserRecord {
   handle: string;
   displayName: string;
   bio: string | null;
+
   avatar: {
     smallUrl: string;
     largeUrl: string;
   };
+
   postCount: number;
   followerCount: number;
   followingCount: number;

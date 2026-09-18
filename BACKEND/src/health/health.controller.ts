@@ -11,4 +11,9 @@ export class HealthController {
   getLive() {
     return this.healthService.getLive();
   }
+
+  @Get('ready')
+  getReady() {
+    return this.healthService.getReady();
+  }
 }

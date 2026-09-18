@@ -3,7 +3,9 @@ import {
   Get,
   NotFoundException,
   Param,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 
 import { UsersService } from './users.service';
 import { validateUuid } from '../common/errors/uuid.validation';
@@ -28,5 +30,30 @@ export class UsersController {
     return {
       item: user,
     };
+  }
+
+  @Get(':id/media')
+  async listProfileMedia(
+    @Param('id') id: string,
+    @Req() request: Request,
+  ) {
+    const validId = validateUuid(id);
+    const cursor =
+      typeof request.query.cursor === 'string'
+        ? request.query.cursor
+        : null;
+    const limit =
+      typeof request.query.limit === 'string'
+        ? Math.min(
+            50,
+            Math.max(1, parseInt(request.query.limit, 10) || 10),
+          )
+        : 10;
+
+    return this.usersService.listProfileMedia(
+      validId,
+      cursor,
+      limit,
+    );
   }
 }

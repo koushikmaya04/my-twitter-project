@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Sidebar from '../../components/Sidebar/Sidebar.jsx';
 import Feed from '../../components/Feed/Feed.jsx';
 import RightSidebar from '../../components/RightSidebar/RightSidebar.jsx';
-import { fetchPosts, simulateLikeRequest, simulateCommentRequest, simulateRetweetRequest } from '../../services/api.js';
+import { fetchPosts, simulateLikeRequest, simulateCommentRequest, simulateRetweetRequest, createPostRequest } from '../../services/api.js';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.js';
 import { createFeedPipeline } from '../../utils/functionalPipeline.js';
 import { eventEmitter } from '../../events/EventEmitter.js';
@@ -196,19 +196,29 @@ const Home = () => {
     const myOpId = prevOpId + 1;
     likeOpIdRef.current.set(tweetId, myOpId);
 
+    const targetDesiredState = !wasLiked;
+
     // Step 2: OPTIMISTIC UPDATE — immediately toggle like on ONLY this tweet
     updatePostById(tweetId, (post) => ({
       ...post,
-      isLiked: !post.isLiked,
-      likeCount: !post.isLiked
+      isLiked: targetDesiredState,
+      likeCount: targetDesiredState
         ? post.likeCount + 1
         : Math.max(0, post.likeCount - 1),
     }));
 
-    // Step 3: Simulate API request in background
-    simulateLikeRequest(tweetId)
-      .then(() => {
-        // Step 4: SUCCESS — optimistic update stands, emit notification
+    // Step 3: API request in background
+    simulateLikeRequest(tweetId, targetDesiredState)
+      .then((data) => {
+        // Step 4: SUCCESS — reconcile with authoritative backend response
+        if (data && typeof data.likedByViewer === 'boolean') {
+          updatePostById(tweetId, (post) => ({
+            ...post,
+            isLiked: data.likedByViewer,
+            likeCount: data.likeCount,
+          }));
+        }
+
         eventEmitter.emit('like', {
           username: previousPost.author,
           tweetId: tweetId,
@@ -397,25 +407,21 @@ const Home = () => {
    * Bug Fix #4: Each post has a stable unique ID (user-{timestamp}),
    * never uses array indexes.
    */
-  const handleNewPost = useCallback((text) => {
-    const newTweet = new Tweet({
-      id: `user-${Date.now()}`,
-      content: text,
-      // Bug Fix #6: Author is always CURRENT_USER
-      author: CURRENT_USER.name,
-      handle: CURRENT_USER.handle,
-      avatar: CURRENT_USER.avatar,
-      timestamp: 'now',
-      likes: 0,
-      imageUrl: null,
-      thumbnailUrl: null,
-      albumId: 0,
-      category: null,
-      verified: false,
-    });
+  const handleNewPost = useCallback(async (text) => {
+    try {
+      const createdPost = await createPostRequest({
+        kind: 'original',
+        text,
+      });
 
-    // Bug Fix #2: Prepend to localPosts — newest first, existing posts unchanged
-    setLocalPosts((prev) => [newTweet.toPlainObject(), ...prev]);
+      const newTweet = Tweet.fromAPIPost(createdPost);
+      setLocalPosts((prev) => [newTweet.toPlainObject(), ...prev]);
+    } catch (error) {
+      console.error('Failed to post tweet:', error);
+      eventEmitter.emit('error', {
+        message: error.message || 'Failed to post tweet.',
+      });
+    }
   }, []);
 
   // ─── Search (Bug Fix #19) ─────────────────────────────────

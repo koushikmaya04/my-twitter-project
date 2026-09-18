@@ -17,7 +17,11 @@ import { PostsModule } from './posts/posts.module';
 
 import { FeedModule } from './feed/feed.module';
 
+import { SearchModule } from './search/search.module';
+
 import { RequestLoggingMiddleware } from './common/request-logging/request-logging.middleware';
+
+import { DatabaseModule } from './database/database.module';
 
 @Module({
   imports: [
@@ -25,6 +29,7 @@ import { RequestLoggingMiddleware } from './common/request-logging/request-loggi
       isGlobal: true,
       load: [configuration],
     }),
+    DatabaseModule, 
 
     HealthModule,
 
@@ -33,6 +38,8 @@ import { RequestLoggingMiddleware } from './common/request-logging/request-loggi
     PostsModule,
 
     FeedModule,
+
+    SearchModule,
   ],
 })
 export class AppModule {

@@ -1,14 +1,10 @@
-import {
-  Inject,
-  Injectable,
-} from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-
 import { SOCIAL_FEED_REPOSITORY } from '../data/repository/social-feed.repository.token';
 import type { SocialFeedRepository } from '../data/repository/social-feed.repository';
 
 @Injectable()
-export class FeedService {
+export class SearchService {
   constructor(
     private readonly configService: ConfigService,
 
@@ -16,19 +12,19 @@ export class FeedService {
     private readonly repository: SocialFeedRepository,
   ) {}
 
-  async getFeed(
+  async searchPosts(
+    query: string,
     cursor: string | null,
     limit: number,
   ) {
     const viewerId =
-      this.configService.getOrThrow<string>(
-        'DEMO_USER_ID',
-      );
+      this.configService.getOrThrow<string>('DEMO_USER_ID');
 
-   return this.repository.listOriginalFeed(
-  cursor,
-  limit,
-  viewerId,
-);
+    return this.repository.searchOriginals(
+      query,
+      cursor,
+      limit,
+      viewerId,
+    );
   }
 }

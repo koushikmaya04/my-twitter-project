@@ -15,4 +15,16 @@ export class UsersService {
   async getUserById(id: string): Promise<UserRecord | null> {
     return this.repository.getUserById(id);
   }
+
+  async listProfileMedia(
+    userId: string,
+    cursor: string | null,
+    limit: number,
+  ) {
+    return this.repository.listProfileMedia(
+      userId,
+      cursor,
+      limit,
+    );
+  }
 }

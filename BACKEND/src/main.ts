@@ -1,11 +1,18 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
+import { join } from 'path';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/errors/http-exception.filter';
+import { RequestIdInterceptor } from './common/request-logging/request-id.interceptor';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new RequestIdInterceptor());
+
+  // Serve static fixture assets from public/
+  app.useStaticAssets(join(__dirname, '..', 'public'));
 
   const configService = app.get(ConfigService);
 
@@ -15,6 +22,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: frontendOrigin,
+    exposedHeaders: ['X-Request-Id', 'X-Request-ID', 'x-request-id'],
   });
 
   app.enableShutdownHooks();

@@ -2,7 +2,14 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
-// Vite provides blazing fast HMR and optimized ES module bundling for modern web apps
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/fixtures': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
 });

@@ -8,12 +8,12 @@ import './Feed.css';
 /**
  * Feed — Center column containing tabs, tweet composer, and the tweet list.
  *
- * Receives already-processed (piped) posts from Home.
+ * Receives already-processed (piped) posts from Home or search results.
  * Renders TweetCards, loading skeletons, error state, and the
  * infinite-scroll sentinel element.
  *
- * Bug Fix #4: Uses post.id as React key (never array index).
- * Bug Fix #21: Adds aria-live for loading/error, aria-label for tabs.
+ * Displays the canonical Request ID in the header and in error states
+ * to guarantee 1:1 match with response headers.
  */
 const Feed = ({
   posts,
@@ -28,6 +28,9 @@ const Feed = ({
   currentUser,
   isLoading,
   error,
+  errorRequestId,
+  displayedRequestId,
+  onRequestIdUpdate,
   onRetry,
   hasMore,
   sentinelRef,
@@ -57,6 +60,32 @@ const Feed = ({
         </button>
       </div>
 
+      {/* Canonical Request ID Display Badge */}
+      {displayedRequestId && (
+        <div
+          className="feed__request-id-badge"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '6px 16px',
+            fontSize: '12px',
+            color: 'var(--text-secondary)',
+            backgroundColor: 'rgba(29, 155, 240, 0.05)',
+            borderBottom: '1px solid var(--border-color)',
+            fontFamily: 'monospace',
+          }}
+        >
+          <span>X-Request-ID:</span>
+          <span
+            data-testid="displayed-request-id"
+            style={{ fontWeight: 600, color: 'var(--text-primary)' }}
+          >
+            {displayedRequestId}
+          </span>
+        </div>
+      )}
+
       {/* Tweet Composer */}
       <TweetComposer onPost={onPost} />
 
@@ -68,7 +97,7 @@ const Feed = ({
         </div>
       )}
 
-      {/* Tweet List — Bug Fix #4: key={tweet.id}, never key={index} */}
+      {/* Tweet List */}
       <div className="feed__list" role="feed" aria-label="Tweets">
         {posts.map((tweet) => (
           <TweetCard
@@ -80,11 +109,12 @@ const Feed = ({
             onFollow={onFollow}
             isFollowing={followedHandles.includes(tweet.handle)}
             currentUser={currentUser}
+            onRequestIdUpdate={onRequestIdUpdate}
           />
         ))}
       </div>
 
-      {/* Loading Skeleton — Bug Fix #21: aria-live announces loading */}
+      {/* Loading Skeleton */}
       <div aria-live="polite" aria-atomic="true">
         {isLoading && (
           <div role="status" aria-label="Loading more tweets">
@@ -94,16 +124,18 @@ const Feed = ({
         )}
       </div>
 
-      {/* Error State — Bug Fix #21: role="alert" for screen readers */}
+      {/* Error State */}
       {error && !isLoading && (
         <div role="alert">
-          <ErrorState message={error} onRetry={onRetry} />
+          <ErrorState
+            message={error}
+            requestId={errorRequestId || displayedRequestId}
+            onRetry={onRetry}
+          />
         </div>
       )}
 
-      {/* Infinite Scroll Sentinel — observed by IntersectionObserver.
-          Hidden when search is active: the filtered result may be empty,
-          which would leave the sentinel visible and cause a runaway fetch loop. */}
+      {/* Infinite Scroll Sentinel */}
       {hasMore && !error && !searchQuery && (
         <div ref={sentinelRef} className="feed__sentinel" aria-hidden="true" />
       )}

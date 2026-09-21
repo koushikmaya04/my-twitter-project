@@ -6,6 +6,8 @@ import { ConfigService } from '@nestjs/config';
 
 import { SOCIAL_FEED_REPOSITORY } from '../data/repository/social-feed.repository.token';
 import type { SocialFeedRepository } from '../data/repository/social-feed.repository';
+import { mapPaginatedPosts } from './dto/dto-mappers';
+import type { FeedResponseDto } from './dto/feed-response.dto';
 
 @Injectable()
 export class FeedService {
@@ -19,16 +21,18 @@ export class FeedService {
   async getFeed(
     cursor: string | null,
     limit: number,
-  ) {
+  ): Promise<FeedResponseDto> {
     const viewerId =
       this.configService.getOrThrow<string>(
-        'DEMO_USER_ID',
+        'demoUserId',
       );
 
-   return this.repository.listOriginalFeed(
-  cursor,
-  limit,
-  viewerId,
-);
+    const result = await this.repository.listOriginalFeed(
+      cursor,
+      limit,
+      viewerId,
+    );
+
+    return mapPaginatedPosts(result);
   }
 }

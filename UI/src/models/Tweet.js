@@ -1,4 +1,5 @@
 import Post from './Post.js';
+import { resolveImageUrl } from '../services/api.js';
 
 /**
  * Tweet — Extends Post with image and category data.
@@ -91,29 +92,29 @@ class Tweet extends Post {
   }
 
   static fromAPIPost(post) {
-  const firstMedia = post.media?.[0] ?? null;
+    const firstMedia = post.media?.[0] ?? null;
 
-  const tweet = new Tweet({
-    id: post.id,
-    content: post.text ?? '',
-    author: post.author.displayName,
-    handle: post.author.handle,
-    avatar: post.author.avatar.smallUrl,
-    timestamp: post.createdAt,
-    likes: post.likeCount,
-    imageUrl: firstMedia?.largeUrl ?? null,
-    thumbnailUrl: firstMedia?.smallUrl ?? null,
-    albumId: null,
-    category: null,
-    verified: false,
-  });
+    const tweet = new Tweet({
+      id: post.id,
+      content: post.text ?? '',
+      author: post.author?.displayName ?? '',
+      handle: post.author?.handle ?? '',
+      avatar: resolveImageUrl(post.author?.avatar?.smallUrl) || `https://i.pravatar.cc/48?img=1`,
+      timestamp: post.createdAt,
+      likes: post.likeCount ?? 0,
+      imageUrl: resolveImageUrl(firstMedia?.largeUrl) ?? null,
+      thumbnailUrl: resolveImageUrl(firstMedia?.smallUrl) ?? null,
+      albumId: null,
+      category: null,
+      verified: false,
+    });
 
-  tweet.retweetCount = 0;
-  tweet.commentCount = post.replyCount;
-  tweet.isLiked = post.likedByViewer;
+    tweet.retweetCount = 0;
+    tweet.commentCount = post.replyCount ?? 0;
+    tweet.isLiked = Boolean(post.likedByViewer);
 
-  return tweet;
-}
+    return tweet;
+  }
   /**
    * Override parent's toPlainObject to include Tweet-specific fields.
    * Demonstrates polymorphism — same method name, extended behavior.

@@ -53,4 +53,28 @@
   color: var(--bg-primary);
   margin-left: 8px;
   flex-shrink: 0;
+  border: none;
+  cursor: pointer;
 }
+
+.search-bar__submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  margin-left: 4px;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.search-bar__submit:hover {
+  color: var(--accent-blue);
+  background-color: rgba(29, 155, 240, 0.1);
+}
+

@@ -2,10 +2,10 @@ import React from 'react';
 import './ErrorState.css';
 
 /**
- * ErrorState — Friendly error message with Retry button.
+ * ErrorState — Friendly error message with Retry button and canonical request ID.
  * Shown when an API request fails.
  */
-const ErrorState = ({ message, onRetry }) => {
+const ErrorState = ({ message, requestId, onRetry }) => {
   return (
     <div className="error-state">
       <div className="error-state__icon">
@@ -14,7 +14,22 @@ const ErrorState = ({ message, onRetry }) => {
         </svg>
       </div>
       <h3 className="error-state__title">Something went wrong</h3>
-      <p className="error-state__message">{message || 'Failed to load tweets. Please try again.'}</p>
+      <p className="error-state__message">
+        {message || 'Failed to load tweets. Please try again.'}
+      </p>
+      {requestId && (
+        <p
+          className="error-state__request-id"
+          style={{
+            fontSize: '13px',
+            color: 'var(--text-secondary)',
+            marginBottom: '16px',
+            fontFamily: 'monospace',
+          }}
+        >
+          Request ID: <span data-testid="error-request-id" style={{ fontWeight: 600 }}>{requestId}</span>
+        </p>
+      )}
       <button className="error-state__retry-btn" onClick={onRetry}>
         Retry
       </button>

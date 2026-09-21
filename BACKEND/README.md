@@ -1,107 +1,658 @@
 # Social Feed Backend
 
-NestJS backend for the Social Feed / Twitter clone assignment.
+A NestJS backend for a Twitter-style social feed application.
 
-This project implements the Stage A server foundation described in PRD 01. It provides a fixture-backed social feed API with cursor pagination, users, posts, validation, request IDs, structured errors, configurable simulated I/O, and automated tests.
+This branch, `intern/koushik/social-persistence`, adds the PostgreSQL persistence layer using **Drizzle ORM** while preserving the existing repository contract and application structure.
+
+## Tech Stack
+
+- **Node.js**
+- **TypeScript**
+- **NestJS**
+- **PostgreSQL**
+- **Drizzle ORM**
+- **Drizzle Kit**
+- **Jest**
+- **Supertest**
+- **pg**
+- **Oxlint**
+- **Prettier**
 
 ## Project Structure
 
 ```text
 BACKEND/
-├── Labs/
-│   └── raw-http-server/
-│       ├── package.json
-│       ├── server.js
-│       └── request-lifecycle.md
+├── db/
+│   ├── schema.sql
+│   ├── seed.sql
+│   ├── queries.sql
+│   ├── constraint-tests.sql
+│   └── transaction-tests.sql
+│
+├── drizzle/
+│   ├── 0000_flimsy_loki.sql
+│   └── meta/
+│
+├── docs/
+│   ├── data-dictionary.md
+│   ├── db-seed-manifest.md
+│   ├── decisions.md
+│   ├── erd.md
+│   ├── query-plan-report.md
+│   └── sql-mapping.md
+│
 ├── src/
-│   ├── main.ts
-│   ├── app.module.ts
-│   ├── config/
 │   ├── common/
-│   ├── health/
-│   ├── users/
-│   ├── posts/
+│   ├── config/
+│   ├── data/
+│   │   ├── fixtures/
+│   │   └── repository/
+│   ├── database/
+│   │   ├── schema/
+│   │   ├── database.module.ts
+│   │   ├── database.provider.ts
+│   │   └── seed.ts
 │   ├── feed/
-│   └── data/
+│   ├── health/
+│   ├── posts/
+│   ├── search/
+│   ├── users/
+│   ├── app.module.ts
+│   └── main.ts
+│
 ├── test/
 │   ├── app.e2e-spec.ts
+│   ├── social-feed.integration.spec.ts
 │   └── jest-e2e.json
+│
 ├── .env.example
+├── drizzle.config.ts
 ├── package.json
-├── package-lock.json
-└── tsconfig files
+└── package-lock.json
 ```
 
-## Requirements
+## Architecture
 
-- Node.js LTS
-- npm
-- NestJS 12
-- TypeScript
+The backend follows a repository-based architecture.
 
-## Installation
-
-From the `BACKEND` directory:
-
-```bash
-npm install
+```text
+Controller
+    ↓
+Service
+    ↓
+SocialFeedRepository contract
+    ↓
+DrizzleSocialFeedRepository
+    ↓
+Drizzle ORM
+    ↓
+PostgreSQL
 ```
 
-## Environment Configuration
+The repository interface defines what the application needs from persistence, while `DrizzleSocialFeedRepository` provides the actual PostgreSQL implementation.
 
-Create a `.env` file based on `.env.example`.
+This keeps business/application code independent from the database implementation.
+
+A repository token is used for NestJS dependency injection:
+
+```ts
+export const SOCIAL_FEED_REPOSITORY =
+  Symbol('SOCIAL_FEED_REPOSITORY');
+```
+
+The current production provider is:
+
+```ts
+{
+  provide: SOCIAL_FEED_REPOSITORY,
+  useClass: DrizzleSocialFeedRepository,
+}
+```
+
+The earlier fixture repository remains in the codebase and implements the same contract.
+
+## Database Layer
+
+The database layer is implemented in:
+
+```text
+src/database/
+```
+
+### Database Provider
+
+`database.provider.ts` creates the PostgreSQL connection pool and the Drizzle database instance.
+
+```ts
+const pool = new Pool({
+  connectionString,
+  connectionTimeoutMillis: 5000,
+});
+
+const db = drizzle({ client: pool });
+```
+
+The database is exposed through a NestJS dependency-injection token:
+
+```ts
+export const DATABASE = Symbol('DATABASE');
+```
+
+Repositories can then inject the shared database instance instead of creating their own connection.
+
+The database provider also closes the PostgreSQL pool during application shutdown.
+
+### Database Module
+
+`database.module.ts` is marked as global:
+
+```ts
+@Global()
+@Module({
+  providers: [databaseProvider],
+  exports: [databaseProvider],
+})
+export class DatabaseModule {}
+```
+
+This makes the database provider available throughout the application.
+
+## Database Schema
+
+The Drizzle schema is located in:
+
+```text
+src/database/schema/
+```
+
+The schema is split into separate files:
+
+```text
+users.ts
+posts.ts
+post-media.ts
+likes.ts
+follows.ts
+index.ts
+```
+
+The main entities are:
+
+- **users**
+- **posts**
+- **post_media**
+- **likes**
+- **follows**
+
+### Users
+
+Stores user identity information such as:
+
+- UUID
+- handle
+- display name
+
+### Posts
+
+Supports:
+
+- original posts
+- replies
+- reposts
+
+A post can reference another post through:
+
+```text
+reply_to_id
+repost_of_id
+```
+
+### Post Media
+
+Stores media associated with posts.
+
+Each media record contains:
+
+- UUID
+- post ID
+- position
+- alt text
+- width
+- height
+- small URL
+- large URL
+
+### Likes
+
+Represents the relationship between a user and a post.
+
+The database prevents duplicate user/post like combinations.
+
+### Follows
+
+Represents the relationship between follower and following users.
+
+The schema also enforces relationship constraints.
+
+## Drizzle Configuration
+
+`drizzle.config.ts` configures Drizzle Kit.
+
+Drizzle Kit:
+
+1. reads the TypeScript schema
+2. generates SQL migrations
+3. stores generated migrations in `drizzle/`
+4. connects to PostgreSQL using `DATABASE_URL`
+
+## Environment Variables
+
+Create a `.env` file inside `BACKEND/`.
+
+Example:
 
 ```env
 PORT=3000
 FRONTEND_ORIGIN=http://localhost:5173
+
 DEMO_USER_ID=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+
+DATABASE_URL=postgresql://postgres:password@localhost:5432/social_feed_dev
+
+DATABASE_CONNECT_TIMEOUT_MS=5000
+
 SIMULATED_IO_MS=0
 ```
 
-| Variable | Description | Default |
-|---|---|---|
-| `PORT` | Port used by the backend | `3000` |
-| `FRONTEND_ORIGIN` | Allowed frontend origin for CORS | `http://localhost:5173` |
-| `DEMO_USER_ID` | Fixture user used as the demo viewer identity | seeded demo user |
-| `SIMULATED_IO_MS` | Non-blocking simulated repository delay | `0` |
+| Variable | Purpose |
+|---|---|
+| `PORT` | Backend HTTP port |
+| `FRONTEND_ORIGIN` | Allowed frontend origin for CORS |
+| `DEMO_USER_ID` | Default/demo viewer ID |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_CONNECT_TIMEOUT_MS` | PostgreSQL connection timeout |
+| `SIMULATED_IO_MS` | Optional artificial repository delay |
 
-`SIMULATED_IO_MS` must be between `0` and `1000`.
+Do not commit `.env`.
 
-## Running the Backend
+Use `.env.example` as the template.
 
-Development:
-
-```bash
-npm run start:dev
-```
-
-Normal mode:
+## Installation
 
 ```bash
-npm run start
+git clone https://github.com/koushikmaya04/my-twitter-project.git
+
+cd my-twitter-project/BACKEND
+
+npm install
 ```
 
-Production:
+Create the environment file:
 
 ```bash
-npm run build
-npm run start:prod
+cp .env.example .env
 ```
 
-The API runs at:
+On Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Update `DATABASE_URL` with your PostgreSQL credentials.
+
+## PostgreSQL Setup
+
+Create a PostgreSQL database:
+
+```sql
+CREATE DATABASE social_feed_dev;
+```
+
+Make sure PostgreSQL is running before performing migrations.
+
+Example connection string:
+
+```env
+DATABASE_URL=postgresql://postgres:password@localhost:5432/social_feed_dev
+```
+
+## Database Workflow
+
+The intended database workflow is:
 
 ```text
-http://localhost:3000
+Drizzle schema
+      ↓
+Generate migration
+      ↓
+Apply migration
+      ↓
+Seed database
+      ↓
+Run application
 ```
 
-# API
+### Generate Migration
 
-## Health
+```bash
+npm run db:generate
+```
 
-### GET /health/live
+This generates SQL migration files inside:
+
+```text
+drizzle/
+```
+
+### Apply Migration
+
+```bash
+npm run db:migrate
+```
+
+This creates or updates the PostgreSQL schema.
+
+### Check Migration State
+
+```bash
+npm run db:check
+```
+
+## Database Seeding
+
+The seed script is:
+
+```text
+src/database/seed.ts
+```
+
+Run it with:
+
+```bash
+npm run db:seed
+```
+
+The seed script loads the existing fixture data:
+
+```text
+src/data/fixtures/fixture-data.ts
+```
+
+and inserts it into PostgreSQL.
+
+The seed process inserts:
+
+- users
+- posts
+- post media
+- likes
+- follows
+
+Before inserting, the seed script deletes existing data in dependency-safe order:
+
+```text
+likes
+post_media
+follows
+posts
+users
+```
+
+This makes seeding deterministic and repeatable during development.
+
+### Important
+
+Database migration and database seeding are different operations.
+
+**Migration:**
+
+```text
+Creates/changes database structure
+```
+
+**Seed:**
+
+```text
+Inserts development/test data
+```
+
+Running the application does not automatically run the seed script.
+
+## Repository Layer
+
+The repository contract is defined in:
+
+```text
+src/data/repository/social-feed.repository.ts
+```
+
+It defines operations including:
+
+```text
+listOriginalFeed()
+getPostById()
+getUserById()
+listReplies()
+listProfileMedia()
+searchOriginals()
+createPost()
+setLike()
+```
+
+The concrete PostgreSQL implementation is:
+
+```text
+src/data/repository/drizzle-social-feed.repository.ts
+```
+
+## Drizzle Repository
+
+`DrizzleSocialFeedRepository` translates application operations into database queries.
+
+It handles:
+
+- feed queries
+- post lookup
+- reply lookup
+- profile media
+- search
+- likes
+- post creation
+- repost validation
+- database transactions
+- cursor pagination
+- batch hydration
+- PostgreSQL error handling
+
+## Cursor Pagination
+
+Feed-style list endpoints use cursor pagination instead of offset pagination.
+
+The cursor is based on:
+
+```text
+(created_at, id)
+```
+
+The ordering is:
+
+```sql
+ORDER BY created_at DESC, id DESC
+```
+
+The repository requests:
+
+```text
+limit + 1
+```
+
+rows.
+
+For a requested limit of `10`, 11 rows are fetched. The 11th row determines whether another page exists.
+
+The response contains:
+
+```json
+{
+  "items": [],
+  "hasMore": true,
+  "nextCursor": "..."
+}
+```
+
+The cursor is encoded as base64url JSON containing:
+
+```json
+{
+  "v": 1,
+  "createdAt": "...",
+  "id": "..."
+}
+```
+
+This provides deterministic pagination even when multiple posts have identical timestamps.
+
+## Batch Hydration
+
+The repository avoids performing one database query per post.
+
+A page of posts is hydrated with bounded batch queries for:
+
+- media
+- like counts
+- reply counts
+- viewer like state
+
+The results are grouped in memory using `Map` and `Set`.
+
+Conceptually:
+
+```text
+Fetch page
+   ↓
+Get post IDs
+   ↓
+Batch media query
+   ↓
+Batch like-count query
+   ↓
+Batch reply-count query
+   ↓
+Batch viewer-like query
+   ↓
+Combine results
+```
+
+This avoids the classic N+1 query pattern.
+
+## Search
+
+Original posts can be searched using PostgreSQL `ILIKE`.
+
+The search implementation:
+
+- limits input to 200 characters
+- escapes `\`
+- escapes `%`
+- escapes `_`
+- uses parameterized SQL
+- supports cursor pagination
+
+This prevents `%` and `_` from unintentionally acting as wildcard characters in user input.
+
+## Creating Posts
+
+`createPost()` supports:
+
+```text
+original
+reply
+repost
+```
+
+### Replies
+
+A reply must have:
+
+```text
+replyToId
+```
+
+The target post must exist.
+
+Replies to reposts are rejected.
+
+### Reposts
+
+A repost must have:
+
+```text
+repostOfId
+```
+
+The target must exist and must be an original post.
+
+The database also prevents duplicate reposts by the same user for the same target.
+
+PostgreSQL unique-constraint errors are mapped to:
+
+```text
+409 Conflict
+```
+
+## Transactions
+
+Post creation uses a database transaction:
+
+```ts
+this.db.transaction(async (tx) => {
+  // validation
+  // insert
+  // reload created post
+});
+```
+
+This ensures the validation and write happen within one transactional boundary.
+
+The transaction executor is also passed to `getPostById()` so the newly created post can be loaded using the same transaction.
+
+## Likes
+
+Likes are stored in the `likes` relation rather than as a mutable counter column.
+
+When a user likes a post:
+
+```text
+INSERT INTO likes
+```
+
+When a user unlikes:
+
+```text
+DELETE FROM likes
+```
+
+The implementation uses:
+
+```ts
+.onConflictDoNothing({
+  target: [likes.userId, likes.postId],
+});
+```
+
+This makes repeated "like" requests idempotent.
+
+The current like count is calculated from the `likes` table.
+
+## Health Checks
+
+Two health endpoints are available.
+
+### Liveness
 
 ```http
-GET http://localhost:3000/health/live
+GET /health/live
 ```
 
 Response:
@@ -112,386 +663,252 @@ Response:
 }
 ```
 
-## Feed
+This verifies that the application process is running.
 
-### GET /feed
-
-Returns original posts ordered by:
-
-1. `createdAt` descending
-2. post ID descending when timestamps are equal
-
-Default page size is `10`.
+### Readiness
 
 ```http
-GET http://localhost:3000/feed
+GET /health/ready
 ```
 
-or:
+The readiness check executes:
 
-```http
-GET http://localhost:3000/feed?limit=10
+```sql
+SELECT 1
 ```
 
-Response shape:
+against PostgreSQL.
+
+Successful response:
 
 ```json
 {
-  "items": [],
-  "nextCursor": "...",
-  "hasMore": true
+  "status": "ok",
+  "database": "ok"
 }
 ```
 
-## Cursor Pagination
+If the database cannot be reached, the endpoint returns a service-unavailable response.
 
-Use `nextCursor` from a response to request the next page:
+## Request IDs and Logging
 
-```http
-GET /feed?limit=10&cursor=<nextCursor>
-```
+The application adds request IDs to incoming requests.
 
-The cursor contains the timestamp and ID of the last item from the previous page.
-
-Legacy page-based pagination is not supported:
-
-```http
-GET /feed?page=1
-```
-
-returns a structured validation error.
-
-## Feed Query Validation
-
-Supported query parameters:
-
-```text
-cursor
-limit
-```
-
-`limit` must be an integer from `1` to `50`.
-
-Invalid examples:
-
-```http
-GET /feed?limit=0
-GET /feed?limit=1.5
-GET /feed?limit=51
-GET /feed?limit=abc
-```
-
-Repeated parameters and unknown query parameters are rejected.
-
-## Posts
-
-### GET /posts/:id
-
-Returns a post by UUID.
-
-```http
-GET http://localhost:3000/posts/11111111-1111-4111-8111-000000000001
-```
-
-Malformed UUIDs return `400`.
-
-A valid UUID that does not exist returns `404`.
-
-## Users
-
-### GET /users/:id
-
-Returns a user profile by UUID.
-
-```http
-GET http://localhost:3000/users/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
-```
-
-The response contains the user's ID, handle, display name, bio, avatar metadata, post count, follower count, and following count.
-
-# Error Responses
-
-API errors use a consistent envelope:
-
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "limit must be an integer from 1 to 50",
-    "details": [
-      {
-        "field": "limit",
-        "reason": "out_of_range"
-      }
-    ]
-  },
-  "requestId": "opaque-request-id"
-}
-```
-
-Supported error codes include:
-
-```text
-VALIDATION_ERROR
-NOT_FOUND
-CONFLICT
-SERVICE_UNAVAILABLE
-INTERNAL_ERROR
-```
-
-# Request IDs
-
-Every request receives a unique request ID.
-
-It is returned through:
+A request ID is generated for each request and exposed using the:
 
 ```text
 X-Request-Id
 ```
 
-The same request ID is included in structured error responses.
+response header.
 
-Request logs contain:
+Request logging also records:
 
 - HTTP method
-- request path
-- response status
-- duration
+- request URL
+- status code
+- request duration
 - request ID
 
-Request bodies and secrets are not logged.
+This makes individual requests easier to trace during development and debugging.
 
-# CORS
+## Error Handling
 
-CORS is enabled only for the configured frontend origin.
-
-Default:
-
-```env
-FRONTEND_ORIGIN=http://localhost:5173
-```
-
-CORS is not authentication.
-
-# Fixture Data
-
-The repository uses deterministic in-memory fixture data.
-
-The fixtures include:
-
-- 6 users
-- 30 original posts
-- 12 replies
-- 4 reposts
-- 10 media records
-- 15 likes
-- 8 follows
-
-The fixtures include pagination and relationship cases such as:
-
-- two posts with the same timestamp
-- a user without media
-- an original with no reactions
-- a liked original
-- multiple feed pages
-
-IDs and timestamps are fixed so tests remain deterministic.
-
-# Repository Boundary
-
-Product logic is separated from fixture storage through the `SocialFeedRepository` interface.
-
-The fixture implementation is:
+Domain errors are defined in:
 
 ```text
-FixtureSocialFeedRepository
+src/common/errors/domain-errors.ts
 ```
 
-The repository is injected through:
+The main errors are:
 
-```text
-SOCIAL_FEED_REPOSITORY
-```
+| Error | HTTP Status | Meaning |
+|---|---:|---|
+| `NotFoundDomainError` | 404 | Requested resource does not exist |
+| `InvalidTargetError` | 422 | Operation references an invalid target |
+| `ConflictDomainError` | 409 | Operation conflicts with existing state |
 
-This allows the repository implementation to be replaced by a fake repository in tests.
+A global exception filter converts application errors into HTTP responses.
 
-# Simulated I/O
+## Testing
 
-The fixture repository supports configurable non-blocking latency:
+The backend contains unit, integration, and e2e testing infrastructure.
 
-```env
-SIMULATED_IO_MS=200
-```
-
-The implementation uses an asynchronous timer and does not block the Node.js event loop with synchronous sleep.
-
-The value must be:
-
-```text
-0 <= SIMULATED_IO_MS <= 1000
-```
-
-# Frontend Integration
-
-The existing React frontend runs on:
-
-```text
-http://localhost:5173
-```
-
-The frontend API adapter calls:
-
-```text
-http://localhost:3000
-```
-
-Feed pagination uses:
-
-```text
-cursor -> nextCursor -> nextCursor
-```
-
-The frontend converts API posts into the existing Tweet model and deduplicates posts by ID when appending pages.
-
-The existing Intersection Observer continues to control infinite scrolling.
-
-# Testing
-
-## Unit tests
+### Unit / Integration Tests
 
 ```bash
 npm test
 ```
 
-The feed service has a unit test using a fake repository.
+### Watch Mode
 
-## End-to-end tests
+```bash
+npm run test:watch
+```
+
+### Coverage
+
+```bash
+npm run test:cov
+```
+
+### End-to-End Tests
 
 ```bash
 npm run test:e2e
 ```
 
-The E2E suite verifies:
+The repository includes:
 
-- health endpoint
-- feed response
-- cursor continuation
-- duplicate prevention
-- invalid limits
-- legacy `page` rejection
-- malformed cursor handling
-- existing posts
-- missing posts
-- malformed UUIDs
-- existing users
-- unknown routes
-
-## Lint
-
-```bash
-npm run lint
+```text
+test/app.e2e-spec.ts
+test/social-feed.integration.spec.ts
 ```
 
-## Format
+The integration tests exercise the persistence layer against the database-backed implementation.
+
+## Useful Commands
+
+### Start in development mode
 
 ```bash
-npm run format
+npm run start:dev
 ```
 
-## Build
+### Start normally
+
+```bash
+npm start
+```
+
+### Build
 
 ```bash
 npm run build
 ```
 
-# Raw Node.js Lab
+### Run production build
 
-The original Node.js HTTP exercise is preserved under:
-
-```text
-Labs/raw-http-server/
+```bash
+npm run start:prod
 ```
 
-Files:
+### Lint
 
-```text
-Labs/raw-http-server/
-├── package.json
-├── server.js
-└── request-lifecycle.md
+```bash
+npm run lint
 ```
 
-The raw server demonstrates:
+### Format
 
-- Node's built-in HTTP server
-- request routing
-- JSON responses
-- asynchronous delay
-- non-blocking behavior
-- concurrent request handling
+```bash
+npm run format
+```
 
-The NestJS application is the Stage A server implementation, while the raw server remains as the prerequisite Node.js lab.
+### Database commands
 
-# Sample Requests
+```bash
+npm run db:generate
+npm run db:migrate
+npm run db:check
+npm run db:seed
+```
 
-Health:
+## Recommended First-Time Setup
+
+```bash
+cd BACKEND
+
+npm install
+
+cp .env.example .env
+
+# Configure PostgreSQL in .env
+
+npm run db:generate
+npm run db:migrate
+npm run db:seed
+
+npm run start:dev
+```
+
+Then verify the backend:
 
 ```bash
 curl http://localhost:3000/health/live
 ```
 
-First feed page:
+and:
 
 ```bash
-curl "http://localhost:3000/feed?limit=10"
+curl http://localhost:3000/health/ready
 ```
 
-Next feed page:
+## Database Documentation
 
-```bash
-curl "http://localhost:3000/feed?limit=10&cursor=<NEXT_CURSOR>"
+Additional database documentation is available under:
+
+```text
+docs/
 ```
 
-Post:
+Important references include:
 
-```bash
-curl http://localhost:3000/posts/11111111-1111-4111-8111-000000000001
+- `docs/erd.md` — entity relationship model
+- `docs/data-dictionary.md` — database field definitions
+- `docs/decisions.md` — database design decisions
+- `docs/query-plan-report.md` — query/index planning
+- `docs/sql-mapping.md` — mapping between PRD SQL queries and repository implementation
+- `docs/db-seed-manifest.md` — seed dataset documentation
+
+The raw SQL used during database modeling and verification is in:
+
+```text
+db/schema.sql
+db/seed.sql
+db/queries.sql
+db/constraint-tests.sql
+db/transaction-tests.sql
 ```
 
-User:
+## Development Notes
 
-```bash
-curl http://localhost:3000/users/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+This branch deliberately keeps the `SocialFeedRepository` interface separate from its implementation.
+
+This allows:
+
+```text
+Application code
+      ↓
+Repository contract
+      ↓
+Fixture repository
 ```
 
-# Known Limitations
+or:
 
-- Stage A uses deterministic in-memory fixtures instead of a persistent database.
-- Authentication is not implemented in Stage A.
-- The API focuses on the required read endpoints.
-- Media URLs are fixture paths and require appropriate static serving if actual image rendering is needed.
-- OpenAPI documentation is not required for the Stage A acceptance gate.
+```text
+Application code
+      ↓
+Repository contract
+      ↓
+Drizzle repository
+      ↓
+PostgreSQL
+```
 
-# Stage A Status
+without changing the consumers of the repository.
 
-The current implementation provides:
+The fixture data remains useful for deterministic development and testing, while `DrizzleSocialFeedRepository` provides the persistent database-backed implementation.
 
-- Raw Node.js HTTP lab
-- NestJS server scaffold
-- Fixture-backed repository
-- Repository dependency injection
-- Health endpoint
-- Feed endpoint
-- Post endpoint
-- User endpoint
-- Cursor pagination
-- Query validation
-- UUID validation
-- Structured error responses
-- Request IDs
-- Request logging
-- Configurable CORS
-- Configurable simulated I/O
-- Unit testing
-- E2E testing
-- Frontend cursor-pagination integration
+## Branch
+
+Current implementation branch:
+
+```text
+intern/koushik/social-persistence
+```
+
+Repository:
+
+https://github.com/koushikmaya04/my-twitter-project

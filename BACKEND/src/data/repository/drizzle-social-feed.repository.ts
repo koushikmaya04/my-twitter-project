@@ -108,7 +108,6 @@ export class DrizzleSocialFeedRepository
       id: decoded.id,
     };
   }
-
   private async hydratePosts(
     pageRows: Array<{
       id: string;
@@ -220,10 +219,7 @@ export class DrizzleSocialFeedRepository
         id: post.authorId,
         handle: post.handle,
         displayName: post.displayName,
-        avatar: {
-          smallUrl: '',
-          largeUrl: '',
-        },
+        avatar: this.getUserAvatar(post.handle),
       },
       media: mediaByPost.get(post.id) ?? [],
       likeCount: likesByPost.get(post.id) ?? 0,
@@ -400,10 +396,7 @@ export class DrizzleSocialFeedRepository
         id: post.authorId,
         handle: post.handle,
         displayName: post.displayName,
-        avatar: {
-          smallUrl: '',
-          largeUrl: '',
-        },
+        avatar: this.getUserAvatar(post.handle),
       },
       media,
       likeCount: Number(likeCount[0].count),
@@ -912,13 +905,18 @@ export class DrizzleSocialFeedRepository
       handle: user.handle,
       displayName: user.displayName,
       bio: null,
-      avatar: {
-        smallUrl: '',
-        largeUrl: '',
-      },
+      avatar: this.getUserAvatar(user.handle),
       postCount: Number(postCountResult?.count ?? 0),
       followerCount: Number(followerCountResult?.count ?? 0),
       followingCount: Number(followingCountResult?.count ?? 0),
+    };
+  }
+
+  private getUserAvatar(handle: string) {
+    const cleanHandle = handle.toLowerCase().replace(/^@/, '').trim();
+    return {
+      smallUrl: `/fixtures/${cleanHandle}-48.jpg`,
+      largeUrl: `/fixtures/${cleanHandle}-96.jpg`,
     };
   }
 }

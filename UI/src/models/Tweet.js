@@ -99,7 +99,7 @@ class Tweet extends Post {
       content: post.text ?? '',
       author: post.author?.displayName ?? '',
       handle: post.author?.handle ?? '',
-      avatar: resolveImageUrl(post.author?.avatar?.smallUrl) || `https://i.pravatar.cc/48?img=1`,
+      avatar: resolveImageUrl(post.author?.avatar?.smallUrl),
       timestamp: post.createdAt,
       likes: post.likeCount ?? 0,
       imageUrl: resolveImageUrl(firstMedia?.largeUrl) ?? null,

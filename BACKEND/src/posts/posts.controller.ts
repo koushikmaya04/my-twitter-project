@@ -18,7 +18,7 @@ import { validateUuid } from '../common/errors/uuid.validation';
 export class PostsController {
   constructor(
     private readonly postsService: PostsService,
-  ) {}
+  ) {}    
 
   @Get(':id')
   async getPostById(@Param('id') id: string) {

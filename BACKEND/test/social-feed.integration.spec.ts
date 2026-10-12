@@ -331,7 +331,7 @@ describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
             text: 'Temporary post should be rolled back',
           });
 
-          // 2. Deliberate failure: violation of duplicate primary key
+           // 2. Deliberate failure: violation of duplicate primary key
           await tx.insert(posts).values({
             id: rollbackPostId,
             authorId: ashaId,

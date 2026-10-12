@@ -373,6 +373,7 @@ ORDER BY post_ids.post_id;
 -- - One query for a batch of posts
 -- - Avoid N queries
 --
+
 -- $1 = viewer user ID
 -- ============================================================
 --schecks if a specified id liked these posts or not

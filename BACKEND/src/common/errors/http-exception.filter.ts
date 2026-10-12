@@ -21,8 +21,7 @@ interface ErrorResponse {
 
 @Catch()
 export class HttpExceptionFilter
-  implements ExceptionFilter
-{
+  implements ExceptionFilter {
   private readonly logger = new Logger(
     HttpExceptionFilter.name,
   );

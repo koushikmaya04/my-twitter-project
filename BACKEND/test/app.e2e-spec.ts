@@ -1,3 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import { inArray } from 'drizzle-orm';
+import { Inject } from '@nestjs/common';
+import { DATABASE } from '../src/database/database.provider';
+import { posts } from '../src/database/schema';
 import { SOCIAL_FEED_READ_FAILURE } from '../src/data/repository/social-feed-read-failure.token';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -313,12 +318,49 @@ describe('Social Feed HTTP API', () => {
       expect.any(String),
     );
   });
-    it('does not skip or duplicate posts when timestamps are tied', async () => {
+    
+it('does not skip or duplicate posts when timestamps are tied', async () => {
+  const db = app.get(DATABASE) as any;
+
+  const [lowerId, higherId] = [
+    randomUUID(),
+    randomUUID(),
+  ].sort();
+
+  const testPostIds = [lowerId, higherId];
+
+  // Both posts will have exactly the same timestamp.
+  // A future timestamp ensures they appear at the top of the feed.
+  const tiedTimestamp = new Date('2099-01-01T10:00:00.000Z');
+
+  try {
+    await db.insert(posts).values([
+      {
+        id: lowerId,
+        authorId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        kind: 'original',
+        text: 'Pagination tie test - lower ID',
+        createdAt: tiedTimestamp,
+        replyToId: null,
+        repostOfId: null,
+      },
+      {
+        id: higherId,
+        authorId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        kind: 'original',
+        text: 'Pagination tie test - higher ID',
+        createdAt: tiedTimestamp,
+        replyToId: null,
+        repostOfId: null,
+      },
+    ]);
+
     const firstPage = await request(app.getHttpServer())
       .get('/feed?limit=1')
       .expect(200);
 
     expect(firstPage.body.items).toHaveLength(1);
+    expect(firstPage.body.items[0].id).toBe(higherId);
     expect(firstPage.body.nextCursor).toEqual(
       expect.any(String),
     );
@@ -332,51 +374,69 @@ describe('Social Feed HTTP API', () => {
       .expect(200);
 
     expect(secondPage.body.items).toHaveLength(1);
+    expect(secondPage.body.items[0].id).toBe(lowerId);
 
-    const firstId = firstPage.body.items[0].id;
-    const secondId = secondPage.body.items[0].id;
-
-    expect(secondId).not.toBe(firstId);
+    expect(secondPage.body.items[0].id).not.toBe(
+      firstPage.body.items[0].id,
+    );
 
     expect(secondPage.body.items[0].createdAt).toBe(
       firstPage.body.items[0].createdAt,
     );
-  });
-    it('returns three pages without duplicates or skipped posts', async () => {
-    const page1 = await request(app.getHttpServer())
-      .get('/feed?limit=10')
-      .expect(200);
+  } finally {
+    // Remove only the two posts created by this test.
+    await db
+      .delete(posts)
+      .where(inArray(posts.id, testPostIds));
+  }
+});
 
-    const page2 = await request(app.getHttpServer())
-      .get(
-        `/feed?limit=10&cursor=${encodeURIComponent(
-          page1.body.nextCursor,
-        )}`,
-      )
-      .expect(200);
+  
+it('returns three pages without duplicates or skipped posts', async () => {
+  const page1 = await request(app.getHttpServer())
+    .get('/feed?limit=10')
+    .expect(200);
 
-    const page3 = await request(app.getHttpServer())
-      .get(
-        `/feed?limit=10&cursor=${encodeURIComponent(
-          page2.body.nextCursor,
-        )}`,
-      )
-      .expect(200);
+  expect(page1.body.items).toHaveLength(10);
+  expect(page1.body.hasMore).toBe(true);
+  expect(page1.body.nextCursor).toEqual(expect.any(String));
 
-    const ids = [
-      ...page1.body.items,
-      ...page2.body.items,
-      ...page3.body.items,
-    ].map((item: { id: string }) => item.id);
+  const page2 = await request(app.getHttpServer())
+    .get(
+      `/feed?limit=10&cursor=${encodeURIComponent(
+        page1.body.nextCursor,
+      )}`,
+    )
+    .expect(200);
 
-    expect(ids).toHaveLength(30);
-    expect(new Set(ids).size).toBe(30);
+  expect(page2.body.items).toHaveLength(10);
+  expect(page2.body.hasMore).toBe(true);
+  expect(page2.body.nextCursor).toEqual(expect.any(String));
 
-    expect(page1.body.hasMore).toBe(true);
-    expect(page2.body.hasMore).toBe(true);
-    expect(page3.body.hasMore).toBe(false);
-    expect(page3.body.nextCursor).toBeNull();
-  });
+  const page3 = await request(app.getHttpServer())
+    .get(
+      `/feed?limit=10&cursor=${encodeURIComponent(
+        page2.body.nextCursor,
+      )}`,
+    )
+    .expect(200);
+
+  expect(page3.body.items).toHaveLength(10);
+
+  const ids = [
+    ...page1.body.items,
+    ...page2.body.items,
+    ...page3.body.items,
+  ].map((item: { id: string }) => item.id);
+
+  expect(ids).toHaveLength(30);
+  expect(new Set(ids).size).toBe(30);
+
+  // With 32 original posts, two posts should remain.
+  expect(page3.body.hasMore).toBe(true);
+  expect(page3.body.nextCursor).toEqual(expect.any(String));
+});
+
   
     it('handles delayed feed requests without blocking health checks', async () => {
     const moduleRef = await Test.createTestingModule({

@@ -23,6 +23,8 @@ import { RequestLoggingMiddleware } from './common/request-logging/request-loggi
 
 import { DatabaseModule } from './database/database.module';
 
+import { AuthModule } from './auth/auth.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -40,6 +42,8 @@ import { DatabaseModule } from './database/database.module';
     FeedModule,
 
     SearchModule,
+
+    AuthModule,
   ],
 })
 export class AppModule {

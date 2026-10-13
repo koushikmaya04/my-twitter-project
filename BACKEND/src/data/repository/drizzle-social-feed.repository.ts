@@ -120,7 +120,7 @@ export class DrizzleSocialFeedRepository
       handle: string;
       displayName: string;
     }>,
-    viewerId: string,
+    viewerId: string | null,
     executor: any = this.db,
   ): Promise<PostRecord[]> {
     const postIds = pageRows.map((post) => post.id);
@@ -165,8 +165,10 @@ export class DrizzleSocialFeedRepository
       .where(inArray(posts.replyToId, postIds))
       .groupBy(posts.replyToId);
 
-    // 4. Batch Viewer Likes Query
-    const viewerLikeRows = await executor
+
+// 4. Batch Viewer Likes Query
+const viewerLikeRows = viewerId
+  ? await executor
       .select({
         postId: likes.postId,
       })
@@ -176,7 +178,9 @@ export class DrizzleSocialFeedRepository
           eq(likes.userId, viewerId),
           inArray(likes.postId, postIds),
         ),
-      );
+      )
+  : [];
+
 
     const mediaByPost = new Map<string, MediaRecord[]>();
     for (const media of mediaRows) {
@@ -233,7 +237,7 @@ export class DrizzleSocialFeedRepository
   async listOriginalFeed(
     cursor: string | null,
     limit: number,
-    viewerId: string,
+    viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>> {
     await this.waitIfConfigured();
     this.checkReadFailure();
@@ -310,7 +314,7 @@ export class DrizzleSocialFeedRepository
 
   async getPostById(
     id: string,
-    viewerId: string,
+    viewerId: string | null,
     executor: any = this.db,
   ): Promise<PostRecord | null> {
     const result = await executor
@@ -374,7 +378,8 @@ export class DrizzleSocialFeedRepository
         eq(posts.replyToId, id),
       );
 
-    const viewerLike = await executor
+  const viewerLike = viewerId
+  ? await executor
       .select({
         postId: likes.postId,
       })
@@ -385,7 +390,8 @@ export class DrizzleSocialFeedRepository
           eq(likes.postId, id),
         ),
       )
-      .limit(1);
+      .limit(1)
+  : [];
 
     return {
       id: post.id,
@@ -411,7 +417,7 @@ export class DrizzleSocialFeedRepository
     postId: string,
     cursor: string | null,
     limit: number,
-    viewerId: string,
+    viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>> {
     await this.waitIfConfigured();
     this.checkReadFailure();
@@ -570,7 +576,7 @@ export class DrizzleSocialFeedRepository
     query: string,
     cursor: string | null,
     limit: number,
-    viewerId: string,
+    viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>> {
     await this.waitIfConfigured();
     this.checkReadFailure();

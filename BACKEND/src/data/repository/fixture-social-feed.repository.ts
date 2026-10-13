@@ -60,7 +60,7 @@ export class FixtureSocialFeedRepository
   async listOriginalFeed(
     cursor: string | null,
     limit: number,
-    viewerId: string,
+    viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>> {
     await this.waitIfConfigured();
     this.checkReadFailure();
@@ -127,7 +127,7 @@ export class FixtureSocialFeedRepository
 
   async getPostById(
     id: string,
-    viewerId: string,
+    viewerId: string | null,
   ): Promise<PostRecord | null> {
     this.checkReadFailure();
     await this.waitIfConfigured();
@@ -158,7 +158,7 @@ export class FixtureSocialFeedRepository
     postId: string,
     cursor: string | null,
     limit: number,
-    viewerId: string,
+    viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>> {
     await this.waitIfConfigured();
     this.checkReadFailure();
@@ -376,7 +376,7 @@ export class FixtureSocialFeedRepository
 
   private toPostRecord(
     post: (typeof posts)[number],
-    viewerId: string,
+    viewerId: string | null,
   ): PostRecord {
     const author = users.find(
       (user) => user.id === post.authorId,
@@ -411,11 +411,13 @@ export class FixtureSocialFeedRepository
         item.replyToId === post.id,
     ).length;
 
-    const likedByViewer = likes.some(
-      (like) =>
-        like.postId === post.id &&
-        like.userId === viewerId,
-    );
+const likedByViewer =
+  viewerId !== null &&
+  likes.some(
+    (like) =>
+      like.postId === post.id &&
+      like.userId === viewerId,
+  );
 
     return {
       id: post.id,

@@ -16,6 +16,8 @@ export const users = pgTable(
     handle: text('handle').notNull(),
 
     displayName: text('display_name').notNull(),
+    // new coloumn from prd js p0-01
+    passwordHash: text('password_hash'),
 
     createdAt: timestamp('created_at', {
       withTimezone: true,

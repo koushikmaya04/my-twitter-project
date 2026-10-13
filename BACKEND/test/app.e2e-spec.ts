@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { inArray } from 'drizzle-orm';
 import { Inject } from '@nestjs/common';
 import { DATABASE } from '../src/database/database.provider';
-import { posts } from '../src/database/schema';
 import { SOCIAL_FEED_READ_FAILURE } from '../src/data/repository/social-feed-read-failure.token';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { ConfigModule } from '@nestjs/config';
+import { posts, sessions } from '../src/database/schema';
+import { createHash, randomBytes } from 'node:crypto';
 
 import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/errors/http-exception.filter';
@@ -486,5 +487,160 @@ it('returns three pages without duplicates or skipped posts', async () => {
     expect(feedDuration).toBeGreaterThanOrEqual(200);
 
     await delayedApp.close();
+  });
+
+
+  describe('Authentication HTTP API', () => {
+    const handle = `auth_test_${Date.now()}`;
+    const password = 'SecurePass123!';
+
+    it('rejects access to the current-account endpoint without a session', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/auth/me')
+        .expect(401);
+
+      expect(response.body.error).toBeDefined();
+      expect(response.body.requestId).toEqual(
+        expect.any(String),
+      );
+    });
+    
+it('rejects an invalid session cookie', async () => {
+  const response = await request(app.getHttpServer())
+    .get('/auth/me')
+    .set('Cookie', 'session=not-a-valid-session-token')
+    .expect(401);
+
+  expect(response.body.error).toBeDefined();
+  expect(response.body.requestId).toEqual(
+    expect.any(String),
+  );
+});
+
+
+    it('registers an account without exposing credentials', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          handle,
+          displayName: 'Authentication Test',
+          password,
+        })
+        .expect(201);
+
+      expect(response.body.item.handle).toBe(handle);
+      expect(response.body).not.toHaveProperty('password');
+      expect(response.body).not.toHaveProperty('passwordHash');
+    });
+
+    it('rejects duplicate handles regardless of letter case', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          handle: handle.toUpperCase(),
+          displayName: 'Duplicate Account',
+          password,
+        })
+        .expect(409);
+
+      expect(response.body.error).toBeDefined();
+      expect(response.body.requestId).toEqual(
+        expect.any(String),
+      );
+    });
+  
+it('rejects an expired session cookie', async () => {
+  const db = app.get(DATABASE) as any;
+
+  // Create a test account.
+  const register = await request(app.getHttpServer())
+    .post('/auth/register')
+    .send({
+      handle: `expired_test_${Date.now()}`,
+      displayName: 'Expired Session Test',
+      password: 'SecurePass123!',
+    })
+    .expect(201);
+
+  const userId = register.body.item.id;
+
+  // Generate a raw token, then store only its SHA-256 hash.
+  const token = randomBytes(32).toString('base64url');
+  const tokenHash = createHash('sha256')
+    .update(token)
+    .digest('hex');
+
+  await db.insert(sessions).values({
+    tokenHash,
+    userId,
+    expiresAt: new Date(Date.now() - 60_000),
+  });
+
+  // The session expired one minute ago.
+  const response = await request(app.getHttpServer())
+    .get('/auth/me')
+    .set('Cookie', `session=${token}`)
+    .expect(401);
+
+  expect(response.body.error).toBeDefined();
+  expect(response.body.requestId).toEqual(
+    expect.any(String),
+  );
+});
+
+
+    it('logs in, identifies the session account, and revokes the session on logout', async () => {
+      const login = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ handle, password })
+        .expect(200);
+
+   
+const cookies = login.headers['set-cookie'];
+
+expect(cookies).toBeDefined();
+
+const cookieList = Array.isArray(cookies)
+  ? cookies
+  : [cookies];
+
+const sessionCookie = cookieList.find(
+  (cookie) => cookie.startsWith('session='),
+);
+
+expect(sessionCookie).toBeDefined();
+
+      expect(sessionCookie).toBeDefined();
+      expect(sessionCookie).toContain('HttpOnly');
+
+      const cookie = sessionCookie!.split(';')[0];
+
+      const currentAccount = await request(app.getHttpServer())
+        .get('/auth/me')
+        .set('Cookie', cookie)
+        .expect(200);
+
+      expect(currentAccount.body.item.handle).toBe(handle);
+
+      await request(app.getHttpServer())
+        .post('/auth/logout')
+        .set('Cookie', cookie)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get('/auth/me')
+        .set('Cookie', cookie)
+        .expect(401);
+    });
+
+    it('rejects incorrect credentials', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({
+          handle,
+          password: 'WrongPassword123!',
+        })
+        .expect(401);
+    });
   });
 });

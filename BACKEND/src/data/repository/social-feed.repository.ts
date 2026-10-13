@@ -5,17 +5,16 @@ export interface CreatePostCommand {
   replyToId?: string;
   repostOfId?: string;
 }
-
 export interface SocialFeedRepository {
   listOriginalFeed(
     cursor: string | null,
     limit: number,
-    viewerId: string,
+    viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>>;
 
   getPostById(
     id: string,
-    viewerId: string,
+    viewerId: string | null,
   ): Promise<PostRecord | null>;
 
   getUserById(
@@ -26,7 +25,7 @@ export interface SocialFeedRepository {
     postId: string,
     cursor: string | null,
     limit: number,
-    viewerId: string,
+    viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>>;
 
   listProfileMedia(
@@ -39,7 +38,7 @@ export interface SocialFeedRepository {
     query: string,
     cursor: string | null,
     limit: number,
-    viewerId: string,
+    viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>>;
 
   createPost(

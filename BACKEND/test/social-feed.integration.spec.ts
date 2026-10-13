@@ -63,6 +63,56 @@ describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
         expect(item.author.handle).toBeDefined();
       }
     });
+it('listOriginalFeed supports anonymous viewers', async () => {
+  const result = await repository.listOriginalFeed(null, 10, null);
+
+  expect(result.items.length).toBeGreaterThan(0);
+
+  for (const item of result.items) {
+    expect(item.kind).toBe('original');
+    expect(typeof item.likeCount).toBe('number');
+    expect(item.likedByViewer).toBe(false);
+  }
+});
+it('getPostById supports anonymous viewers', async () => {
+  const result = await repository.getPostById(postWithRepliesId, null);
+
+  expect(result).not.toBeNull();
+  expect(result?.likedByViewer).toBe(false);
+  expect(typeof result?.likeCount).toBe('number');
+});
+it('listReplies supports anonymous viewers', async () => {
+  const result = await repository.listReplies(
+    postWithRepliesId,
+    null,
+    10,
+    null,
+  );
+
+  expect(result.items.length).toBeGreaterThan(0);
+
+  for (const reply of result.items) {
+    expect(reply.kind).toBe('reply');
+    expect(reply.likedByViewer).toBe(false);
+  }
+});
+
+it('searchOriginals supports anonymous viewers', async () => {
+  const result = await repository.searchOriginals(
+    'database',
+    null,
+    10,
+    null,
+  );
+
+  expect(result.items.length).toBeGreaterThan(0);
+
+  for (const item of result.items) {
+    expect(item.kind).toBe('original');
+    expect(item.text?.toLowerCase()).toContain('database');
+    expect(item.likedByViewer).toBe(false);
+  }
+});
 
     it('listOriginalFeed continues with nextCursor without duplicates', async () => {
       const page1 = await repository.listOriginalFeed(null, 5, ashaId);

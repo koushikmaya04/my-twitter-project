@@ -92,7 +92,17 @@ export class HttpExceptionFilter
         status === HttpStatus.UNPROCESSABLE_ENTITY
       ) {
         code = 'INVALID_TARGET';
+      }
+       else if (
+        status === HttpStatus.UNAUTHORIZED
+      ) {
+        code = 'UNAUTHORIZED';
       } else if (
+        status === HttpStatus.FORBIDDEN
+      ) {
+        code = 'FORBIDDEN';
+      }
+ else if (
         status === HttpStatus.SERVICE_UNAVAILABLE
       ) {
         code = 'SERVICE_UNAVAILABLE';

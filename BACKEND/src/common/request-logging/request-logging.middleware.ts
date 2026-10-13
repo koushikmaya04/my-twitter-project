@@ -33,7 +33,7 @@ export class RequestLoggingMiddleware
       const durationMs = Date.now() - startTime;
 
       this.logger.log(
-        `${req.method} ${req.originalUrl} ` +
+        `${req.method} ${req.path} ` +
           `${res.statusCode} ${durationMs}ms ` +
           `requestId=${req.requestId ?? 'unknown'}`,
       );

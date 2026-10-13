@@ -109,16 +109,20 @@ export class HttpExceptionFilter
       } else if (status >= 500) {
         code = 'INTERNAL_ERROR';
       }
-    } else {
-      // Unhandled exception — log server-side for debugging.
-      // Never expose raw error details to the client.
-      this.logger.error(
-        `Unhandled exception [requestId=${requestId}]`,
-        exception instanceof Error
-          ? exception.stack
-          : String(exception),
-      );
-    }
+   
+} else {
+  // Log only diagnostic metadata; avoid exposing SQL,
+  // credentials, or other internal exception details.
+  const exceptionType =
+    exception instanceof Error
+      ? exception.name
+      : typeof exception;
+
+  this.logger.error(
+    `Unhandled exception [requestId=${requestId}] type=${exceptionType}`,
+  );
+}
+
 
     response.setHeader('X-Request-ID', requestId);
     response.status(status).json({

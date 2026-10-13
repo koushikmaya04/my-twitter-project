@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   UnauthorizedException,
+   BadRequestException,
 } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import * as argon2 from 'argon2';
@@ -28,27 +29,111 @@ export class AuthService {
     return cookie?.slice('session='.length) || undefined;
   }
 
+private validateObjectInput(
+  input: unknown,
+  allowedFields: string[],
+): Record<string, unknown> {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    Array.isArray(input)
+  ) {
+    throw new BadRequestException(
+      'Request body must be a JSON object',
+    );
+  }
+
+  const body = input as Record<string, unknown>;
+
+  if (Object.keys(body).some(
+    (key) => !allowedFields.includes(key),
+  )) {
+    throw new BadRequestException(
+      'Request body contains unsupported fields',
+    );
+  }
+
+  return body;
+}
+
+private normalizeAndValidateHandle(
+  value: unknown,
+): string {
+  if (typeof value !== 'string') {
+    throw new BadRequestException(
+      'Handle must be a string',
+    );
+  }
+
+  const handle = value.trim().toLowerCase();
+
+  if (handle.length < 3 || handle.length > 30) {
+    throw new BadRequestException(
+      'Handle must contain between 3 and 30 characters',
+    );
+  }
+
+  if (!/^[a-z0-9_]+$/.test(handle)) {
+    throw new BadRequestException(
+      'Handle may contain only letters, numbers, and underscores',
+    );
+  }
+
+  return handle;
+}
+
+private validatePassword(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new BadRequestException(
+      'Password must be a string',
+    );
+  }
+
+  const length = Array.from(value).length;
+
+  if (length < 8 || length > 128) {
+    throw new BadRequestException(
+      'Password must contain between 8 and 128 characters',
+    );
+  }
+
+  return value;
+}
+
   async register(input: {
     handle: string;
     displayName: string;
     password: string;
   }) {
-    const handle = input.handle?.trim().toLowerCase();
-    const displayName = input.displayName?.trim();
+   
+const body = this.validateObjectInput(input, [
+  'handle',
+  'displayName',
+  'password',
+]);
 
-    if (!handle || !displayName || !input.password) {
-      throw new ConflictException(
-        'Handle, display name, and password are required',
-      );
-    }
+const handle = this.normalizeAndValidateHandle(
+  body.handle,
+);
 
-    if (input.password.length < 8) {
-      throw new ConflictException(
-        'Password must contain at least 8 characters',
-      );
-    }
+if (typeof body.displayName !== 'string') {
+  throw new BadRequestException(
+    'Display name must be a string',
+  );
+}
 
-    const passwordHash = await argon2.hash(input.password);
+const displayName = body.displayName.trim();
+const displayNameLength = Array.from(displayName).length;
+
+if (displayNameLength < 1 || displayNameLength > 80) {
+  throw new BadRequestException(
+    'Display name must contain between 1 and 80 characters',
+  );
+}
+
+const password = this.validatePassword(body.password);
+const passwordHash = await argon2.hash(password);
+
 
     try {
       const [user] = await this.db
@@ -83,11 +168,16 @@ export class AuthService {
   }
 
   async login(input: { handle: string; password: string }) {
-    const handle = input.handle?.trim().toLowerCase();
+   const body = this.validateObjectInput(input, [
+  'handle',
+  'password',
+]);
 
-    if (!handle || !input.password) {
-      throw new UnauthorizedException('Invalid handle or password');
-    }
+const handle = this.normalizeAndValidateHandle(
+  body.handle,
+);
+
+const password = this.validatePassword(body.password);
 
     const [user] = await this.db
       .select({
@@ -103,7 +193,7 @@ export class AuthService {
 
     if (
       !user?.passwordHash ||
-      !(await argon2.verify(user.passwordHash, input.password))
+     !(await argon2.verify(user.passwordHash, password))
     ) {
       throw new UnauthorizedException('Invalid handle or password');
     }

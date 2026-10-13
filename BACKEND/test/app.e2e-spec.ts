@@ -548,6 +548,45 @@ it('rejects an invalid session cookie', async () => {
         expect.any(String),
       );
     });
+
+    
+it('creates only one account for 20 concurrent registrations of the same normalized handle', async () => {
+  const sharedHandle = `race_${Date.now()}`;
+
+  const responses = await Promise.all(
+    Array.from({ length: 20 }, (_, index) => {
+      const submittedHandle =
+        index % 2 === 0
+          ? sharedHandle
+          : `  ${sharedHandle.toUpperCase()}  `;
+
+      return request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          handle: submittedHandle,
+          displayName: `Concurrent Test ${index}`,
+          password: 'SecurePass123!',
+        });
+    }),
+  );
+
+  const created = responses.filter(
+    (response) => response.status === 201,
+  );
+
+  const conflicts = responses.filter(
+    (response) => response.status === 409,
+  );
+
+  expect(created).toHaveLength(1);
+  expect(conflicts).toHaveLength(19);
+
+  for (const response of responses) {
+    expect(response.body).not.toHaveProperty('password');
+    expect(response.body).not.toHaveProperty('passwordHash');
+  }
+});
+
   
 it('rejects an expired session cookie', async () => {
   const db = app.get(DATABASE) as any;

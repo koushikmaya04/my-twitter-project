@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { inArray } from 'drizzle-orm';
-import { Inject } from '@nestjs/common';
+import {
+  INestApplication,
+  Inject,
+  ValidationPipe,
+} from '@nestjs/common';
 import { DATABASE } from '../src/database/database.provider';
 import { SOCIAL_FEED_READ_FAILURE } from '../src/data/repository/social-feed-read-failure.token';
-import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { ConfigModule } from '@nestjs/config';
@@ -21,11 +24,21 @@ describe('Social Feed HTTP API', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleRef.createNestApplication();
+  
+app = moduleRef.createNestApplication();
 
-    app.useGlobalFilters(new HttpExceptionFilter());
+app.useGlobalFilters(new HttpExceptionFilter());
 
-    await app.init();
+app.useGlobalPipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }),
+);
+
+await app.init();
+
   });
 
   afterAll(async () => {
@@ -672,6 +685,7 @@ expect(sessionCookie).toBeDefined();
         .expect(401);
     });
 
+   
     it('rejects incorrect credentials', async () => {
       await request(app.getHttpServer())
         .post('/auth/login')
@@ -681,5 +695,269 @@ expect(sessionCookie).toBeDefined();
         })
         .expect(401);
     });
+  });
+
+  describe('Profile HTTP API', () => {
+    it('rejects profile updates without a session', async () => {
+      const response = await request(app.getHttpServer())
+        .patch('/users/me')
+        .send({
+          displayName: 'Unauthorized Update',
+          bio: 'This should not be saved',
+        })
+        .expect(401);
+
+      expect(response.body.error).toBeDefined();
+      expect(response.body.requestId).toEqual(
+        expect.any(String),
+      );
+    });
+    
+    it('updates the authenticated user profile', async () => {
+      const handle = `profile_test_${Date.now()}`;
+      const password = 'SecurePass123!';
+
+      // Register a dedicated test account.
+      const register = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          handle,
+          displayName: 'Original Name',
+          password,
+        })
+        .expect(201);
+
+      const userId = register.body.item.id;
+
+      // Log in to obtain a valid session cookie.
+      const login = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ handle, password })
+        .expect(200);
+
+      const cookies = login.headers['set-cookie'];
+      const cookieList = Array.isArray(cookies)
+        ? cookies
+        : [cookies];
+
+      const sessionCookie = cookieList.find(
+        (cookie) => cookie.startsWith('session='),
+      );
+
+      expect(sessionCookie).toBeDefined();
+
+      const cookie = sessionCookie!.split(';')[0];
+
+      // Update the profile using the authenticated session.
+      const response = await request(app.getHttpServer())
+        .patch('/users/me')
+        .set('Cookie', cookie)
+        .send({
+          displayName: 'Updated Name',
+          bio: 'Learning NestJS and PostgreSQL',
+        })
+        .expect(200);
+
+      expect(response.body.item.id).toBe(userId);
+      expect(response.body.item.handle).toBe(handle);
+      expect(response.body.item.displayName).toBe('Updated Name');
+      expect(response.body.item.bio).toBe(
+        'Learning NestJS and PostgreSQL',
+      );
+
+      // Verify the update persists when the profile is fetched again.
+      const profile = await request(app.getHttpServer())
+        .get(`/users/${userId}`)
+        .expect(200);
+
+      expect(profile.body.item.displayName).toBe('Updated Name');
+      expect(profile.body.item.bio).toBe(
+        'Learning NestJS and PostgreSQL',
+      );
+    });
+    
+it('rejects attempts to change the immutable handle', async () => {
+  const handle = `immutable_test_${Date.now()}`;
+  const password = 'SecurePass123!';
+
+  await request(app.getHttpServer())
+    .post('/auth/register')
+    .send({
+      handle,
+      displayName: 'Immutable Test',
+      password,
+    })
+    .expect(201);
+
+  const login = await request(app.getHttpServer())
+    .post('/auth/login')
+    .send({ handle, password })
+    .expect(200);
+
+  const cookies = login.headers['set-cookie'];
+  const cookieList = Array.isArray(cookies)
+    ? cookies
+    : [cookies];
+
+  const sessionCookie = cookieList.find(
+    (cookie) => cookie.startsWith('session='),
+  );
+
+  expect(sessionCookie).toBeDefined();
+
+  const cookie = sessionCookie!.split(';')[0];
+
+  const response = await request(app.getHttpServer())
+    .patch('/users/me')
+    .set('Cookie', cookie)
+    .send({
+      handle: 'changed_handle',
+    })
+    .expect(400);
+
+  expect(response.body.error).toBeDefined();
+});
+
+it('rejects a display name longer than 80 characters', async () => {
+  const handle = `display_limit_${Date.now()}`;
+  const password = 'SecurePass123!';
+
+  await request(app.getHttpServer())
+    .post('/auth/register')
+    .send({
+      handle,
+      displayName: 'Valid Name',
+      password,
+    })
+    .expect(201);
+
+  const login = await request(app.getHttpServer())
+    .post('/auth/login')
+    .send({ handle, password })
+    .expect(200);
+
+  const cookies = login.headers['set-cookie'];
+  const cookieList = Array.isArray(cookies)
+    ? cookies
+    : [cookies];
+
+  const sessionCookie = cookieList.find(
+    (cookie) => cookie.startsWith('session='),
+  );
+
+  expect(sessionCookie).toBeDefined();
+
+  const cookie = sessionCookie!.split(';')[0];
+
+  await request(app.getHttpServer())
+    .patch('/users/me')
+    .set('Cookie', cookie)
+    .send({
+      displayName: 'A'.repeat(81),
+    })
+    .expect(400);
+});
+
+it('rejects a bio longer than 160 characters', async () => {
+  const handle = `bio_limit_${Date.now()}`;
+  const password = 'SecurePass123!';
+
+  await request(app.getHttpServer())
+    .post('/auth/register')
+    .send({
+      handle,
+      displayName: 'Bio Limit Test',
+      password,
+    })
+    .expect(201);
+
+  const login = await request(app.getHttpServer())
+    .post('/auth/login')
+    .send({ handle, password })
+    .expect(200);
+
+  const cookies = login.headers['set-cookie'];
+  const cookieList = Array.isArray(cookies)
+    ? cookies
+    : [cookies];
+
+  const sessionCookie = cookieList.find(
+    (cookie) => cookie.startsWith('session='),
+  );
+
+  expect(sessionCookie).toBeDefined();
+
+  const cookie = sessionCookie!.split(';')[0];
+
+  await request(app.getHttpServer())
+    .patch('/users/me')
+    .set('Cookie', cookie)
+    .send({
+      bio: 'B'.repeat(161),
+    })
+    .expect(400);
+});
+
+it('trims whitespace from the display name', async () => {
+  const handle = `trim_name_${Date.now()}`;
+  const password = 'SecurePass123!';
+
+  await request(app.getHttpServer())
+    .post('/auth/register')
+    .send({ handle, displayName: 'Original', password })
+    .expect(201);
+
+  const login = await request(app.getHttpServer())
+    .post('/auth/login')
+    .send({ handle, password })
+    .expect(200);
+
+  const cookies = login.headers['set-cookie'];
+  const cookieList = Array.isArray(cookies) ? cookies : [cookies];
+  const sessionCookie = cookieList.find((c) => c.startsWith('session='));
+
+  expect(sessionCookie).toBeDefined();
+  const cookie = sessionCookie!.split(';')[0];
+
+  const response = await request(app.getHttpServer())
+    .patch('/users/me')
+    .set('Cookie', cookie)
+    .send({ displayName: '  Maya  ' })
+    .expect(200);
+
+  expect(response.body.item.displayName).toBe('Maya');
+});
+
+it('rejects a display name that becomes empty after trimming', async () => {
+  const handle = `empty_name_${Date.now()}`;
+  const password = 'SecurePass123!';
+
+  await request(app.getHttpServer())
+    .post('/auth/register')
+    .send({ handle, displayName: 'Original', password })
+    .expect(201);
+
+  const login = await request(app.getHttpServer())
+    .post('/auth/login')
+    .send({ handle, password })
+    .expect(200);
+
+  const cookies = login.headers['set-cookie'];
+  const cookieList = Array.isArray(cookies) ? cookies : [cookies];
+  const sessionCookie = cookieList.find((c) => c.startsWith('session='));
+
+  expect(sessionCookie).toBeDefined();
+  const cookie = sessionCookie!.split(';')[0];
+
+  await request(app.getHttpServer())
+    .patch('/users/me')
+    .set('Cookie', cookie)
+    .send({ displayName: '   ' })
+    .expect(400);
+});
+
+
+
+
   });
 });

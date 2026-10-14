@@ -15,6 +15,7 @@ import type {
   PostRecord,
   SocialFeedRepository,
   UserRecord,
+  UpdateProfileCommand,
 } from './social-feed.repository';
 
 import {
@@ -153,6 +154,39 @@ export class FixtureSocialFeedRepository
 
     return this.toUserRecord(user);
   }
+
+  async updateProfile(
+  command: UpdateProfileCommand,
+): Promise<UserRecord | null> {
+  await this.waitIfConfigured();
+  this.checkReadFailure();
+
+  const user = users.find(
+    (item) => item.id === command.userId,
+  );
+
+  if (!user) {
+    return null;
+  }
+
+  if (command.displayName !== undefined) {
+    user.displayName = command.displayName;
+  }
+
+  if (command.bio !== undefined) {
+    user.bio = command.bio;
+  }
+
+  if (command.avatarSmallUrl !== undefined) {
+    user.avatar.smallUrl = command.avatarSmallUrl ?? '';
+  }
+
+  if (command.avatarLargeUrl !== undefined) {
+    user.avatar.largeUrl = command.avatarLargeUrl ?? '';
+  }
+
+  return this.toUserRecord(user);
+}
 
   async listReplies(
     postId: string,

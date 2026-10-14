@@ -14,6 +14,7 @@ import {
   lt,
   or,
   sql,
+  isNull,
 } from 'drizzle-orm';
 
 import { DATABASE } from '../../database/database.provider';
@@ -32,6 +33,7 @@ import type {
   UserRecord,
   MediaRecord,
   CreatePostCommand,
+  UpdateProfileCommand,
 } from './social-feed.repository';
 
 import { SOCIAL_FEED_READ_FAILURE } from './social-feed-read-failure.token';
@@ -854,70 +856,117 @@ const viewerLikeRows = viewerId
     };
   }
 
-  async getUserById(
-    id: string,
-  ): Promise<UserRecord | null> {
-    const userResult = await this.db
-      .select({
-        id: users.id,
-        handle: users.handle,
-        displayName: users.displayName,
-      })
-      .from(users)
-      .where(eq(users.id, id))
-      .limit(1);
+async getUserById(
+  id: string,
+): Promise<UserRecord | null> {
+  const userResult = await this.db
+    .select({
+      id: users.id,
+      handle: users.handle,
+      displayName: users.displayName,
+      bio: users.bio,
+      avatarSmallUrl: users.avatarSmallUrl,
+      avatarLargeUrl: users.avatarLargeUrl,
+    })
+    .from(users)
+    .where(
+      and(
+        eq(users.id, id),
+        isNull(users.deactivatedAt),
+      ),
+    )
+    .limit(1);
 
-    if (userResult.length === 0) {
-      return null;
-    }
-
-    const user = userResult[0];
-
-    const [postCountResult] =
-      await this.db
-        .select({
-          count: sql<number>`count(*)::int`,
-        })
-        .from(posts)
-        .where(
-          and(
-            eq(posts.authorId, id),
-            eq(posts.kind, 'original'),
-          ),
-        );
-
-    const [followerCountResult] =
-      await this.db
-        .select({
-          count: sql<number>`count(*)::int`,
-        })
-        .from(follows)
-        .where(
-          eq(follows.followingId, id),
-        );
-
-    const [followingCountResult] =
-      await this.db
-        .select({
-          count: sql<number>`count(*)::int`,
-        })
-        .from(follows)
-        .where(
-          eq(follows.followerId, id),
-        );
-
-    return {
-      id: user.id,
-      handle: user.handle,
-      displayName: user.displayName,
-      bio: null,
-      avatar: this.getUserAvatar(user.handle),
-      postCount: Number(postCountResult?.count ?? 0),
-      followerCount: Number(followerCountResult?.count ?? 0),
-      followingCount: Number(followingCountResult?.count ?? 0),
-    };
+  if (userResult.length === 0) {
+    return null;
   }
 
+  const user = userResult[0];
+
+  const [postCountResult] = await this.db
+    .select({
+      count: sql<number>`count(*)::int`,
+    })
+    .from(posts)
+    .where(
+      and(
+        eq(posts.authorId, id),
+        eq(posts.kind, 'original'),
+      ),
+    );
+
+  const [followerCountResult] = await this.db
+    .select({
+      count: sql<number>`count(*)::int`,
+    })
+    .from(follows)
+    .where(eq(follows.followingId, id));
+
+  const [followingCountResult] = await this.db
+    .select({
+      count: sql<number>`count(*)::int`,
+    })
+    .from(follows)
+    .where(eq(follows.followerId, id));
+
+  return {
+    id: user.id,
+    handle: user.handle,
+    displayName: user.displayName,
+    bio: user.bio,
+    avatar: {
+      smallUrl:
+        user.avatarSmallUrl ?? this.getUserAvatar(user.handle).smallUrl,
+      largeUrl:
+        user.avatarLargeUrl ?? this.getUserAvatar(user.handle).largeUrl,
+    },
+    postCount: Number(postCountResult?.count ?? 0),
+    followerCount: Number(followerCountResult?.count ?? 0),
+    followingCount: Number(followingCountResult?.count ?? 0),
+  };
+}
+async updateProfile(
+  command: UpdateProfileCommand,
+): Promise<UserRecord | null> {
+  const updateValues: Record<string, unknown> = {
+    updatedAt: new Date(),
+  };
+
+  if (command.displayName !== undefined) {
+    updateValues.displayName = command.displayName;
+  }
+
+  if (command.bio !== undefined) {
+    updateValues.bio = command.bio;
+  }
+
+  if (command.avatarSmallUrl !== undefined) {
+    updateValues.avatarSmallUrl = command.avatarSmallUrl;
+  }
+
+  if (command.avatarLargeUrl !== undefined) {
+    updateValues.avatarLargeUrl = command.avatarLargeUrl;
+  }
+
+  const [updatedUser] = await this.db
+    .update(users)
+    .set(updateValues)
+    .where(
+      and(
+        eq(users.id, command.userId),
+        isNull(users.deactivatedAt),
+      ),
+    )
+    .returning({
+      id: users.id,
+    });
+
+  if (!updatedUser) {
+    return null;
+  }
+
+  return this.getUserById(command.userId);
+}
   private getUserAvatar(handle: string) {
     const cleanHandle = handle.toLowerCase().replace(/^@/, '').trim();
     return {

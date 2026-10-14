@@ -5,6 +5,15 @@ export interface CreatePostCommand {
   replyToId?: string;
   repostOfId?: string;
 }
+
+export interface UpdateProfileCommand {
+  userId: string;
+  displayName?: string;
+  bio?: string | null;
+  avatarSmallUrl?: string | null;
+  avatarLargeUrl?: string | null;
+}
+
 export interface SocialFeedRepository {
   listOriginalFeed(
     cursor: string | null,
@@ -20,6 +29,10 @@ export interface SocialFeedRepository {
   getUserById(
     id: string,
   ): Promise<UserRecord | null>;
+
+  updateProfile(
+  command: UpdateProfileCommand,
+): Promise<UserRecord | null>;
 
   listReplies(
     postId: string,
@@ -44,6 +57,8 @@ export interface SocialFeedRepository {
   createPost(
     command: CreatePostCommand,
   ): Promise<PostRecord>;
+
+  
 
   setLike(
     postId: string,

@@ -29,6 +29,27 @@ export class UsersService {
     return mapUserToDto(record);
   }
 
+async updateProfile(
+  userId: string,
+  updates: {
+    displayName?: string;
+    bio?: string | null;
+    avatarSmallUrl?: string | null;
+    avatarLargeUrl?: string | null;
+  },
+): Promise<UserProfileDto | null> {
+  const record = await this.repository.updateProfile({
+    userId,
+    ...updates,
+  });
+
+  if (!record) {
+    return null;
+  }
+
+  return mapUserToDto(record);
+}
+
   async listProfileMedia(
     userId: string,
     cursor: string | null,

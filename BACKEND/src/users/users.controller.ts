@@ -4,8 +4,16 @@ import {
   NotFoundException,
   Param,
   Req,
+  Patch,
+Body,
+UseGuards,
+UnauthorizedException,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { SessionGuard } from '../auth/session.guard';
+import type { AuthenticatedRequest } from '../auth/authenticated-request';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+
 
 import { UsersService } from './users.service';
 import { validateUuid } from '../common/errors/uuid.validation';
@@ -15,6 +23,28 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
   ) {}
+
+  @Patch('me')
+  @UseGuards(SessionGuard)
+  async updateMyProfile(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    if (!request.user) {
+      throw new UnauthorizedException();
+    }
+
+    const updatedUser = await this.usersService.updateProfile(
+      request.user.id,
+      dto,
+    );
+
+    if (!updatedUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    return { item: updatedUser };
+  }
 
   @Get(':id')
   async getUserById(@Param('id') id: string) {

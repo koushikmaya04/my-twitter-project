@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   UnauthorizedException,
+  NotFoundException,
    BadRequestException,
 } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -179,24 +180,25 @@ const handle = this.normalizeAndValidateHandle(
 
 const password = this.validatePassword(body.password);
 
-    const [user] = await this.db
-      .select({
-        id: users.id,
-        handle: users.handle,
-        displayName: users.displayName,
-        createdAt: users.createdAt,
-        passwordHash: users.passwordHash,
-      })
+   const [user] = await this.db
+  .select({
+    id: users.id,
+    handle: users.handle,
+    displayName: users.displayName,
+    createdAt: users.createdAt,
+    passwordHash: users.passwordHash,
+    deactivatedAt: users.deactivatedAt,
+  })
       .from(users)
       .where(eq(users.handle, handle))
       .limit(1);
-
-    if (
-      !user?.passwordHash ||
-     !(await argon2.verify(user.passwordHash, password))
-    ) {
-      throw new UnauthorizedException('Invalid handle or password');
-    }
+if (
+  !user?.passwordHash ||
+  !(await argon2.verify(user.passwordHash, password)) ||
+  user.deactivatedAt !== null
+) {
+  throw new UnauthorizedException('Invalid handle or password');
+}
 
     // Send the raw token only to the browser; store its hash in PostgreSQL.
     const token = randomBytes(32).toString('base64url');
@@ -243,6 +245,7 @@ const password = this.validatePassword(body.password);
           eq(sessions.tokenHash, this.hashToken(token)),
           isNull(sessions.revokedAt),
           gt(sessions.expiresAt, new Date()),
+           isNull(users.deactivatedAt),
         ),
       )
       .limit(1);
@@ -253,6 +256,40 @@ const password = this.validatePassword(body.password);
 
     return result;
   }
+
+async deactivate(userId: string): Promise<void> {
+  const now = new Date();
+
+  await this.db.transaction(async (tx: any) => {
+    const [user] = await tx
+      .update(users)
+      .set({
+        deactivatedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(users.id, userId),
+          isNull(users.deactivatedAt),
+        ),
+      )
+      .returning({ id: users.id });
+
+    if (!user) {
+      throw new NotFoundException('Active account not found');
+    }
+
+    await tx
+      .update(sessions)
+      .set({ revokedAt: now })
+      .where(
+        and(
+          eq(sessions.userId, userId),
+          isNull(sessions.revokedAt),
+        ),
+      );
+  });
+}
 
   async logout(cookieHeader?: string) {
     const token = this.readSessionToken(cookieHeader);

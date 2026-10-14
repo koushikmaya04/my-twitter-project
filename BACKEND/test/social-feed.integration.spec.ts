@@ -7,7 +7,8 @@ import {
   InvalidTargetError,
   ConflictDomainError,
 } from '../src/common/errors/domain-errors';
-import { posts, likes } from '../src/database/schema';
+import { randomUUID } from 'node:crypto';
+import { posts, likes, users, postMedia } from '../src/database/schema';
 import { eq, and } from 'drizzle-orm';
 
 describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
@@ -26,6 +27,7 @@ describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
 
   // Track created test posts to clean up
   const createdPostIds: string[] = [];
+  const createdUserIds: string[] = [];
 
   beforeAll(async () => {
     pool = new Pool({
@@ -36,15 +38,20 @@ describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
     repository = new DrizzleSocialFeedRepository(db);
   });
 
-  afterAll(async () => {
-    if (createdPostIds.length > 0) {
-      for (const id of [...createdPostIds].reverse()) {
-        await db.delete(likes).where(eq(likes.postId, id));
-        await db.delete(posts).where(eq(posts.id, id));
-      }
+ afterAll(async () => {
+  if (createdPostIds.length > 0) {
+    for (const id of [...createdPostIds].reverse()) {
+      await db.delete(likes).where(eq(likes.postId, id));
+      await db.delete(posts).where(eq(posts.id, id));
     }
-    await pool.end();
-  });
+  }
+
+  for (const id of createdUserIds) {
+    await db.delete(users).where(eq(users.id, id));
+  }
+
+  await pool.end();
+});
 
   describe('Read Use Cases & Cursor Pagination', () => {
     it('listOriginalFeed returns originals with batch counts and viewer state', async () => {
@@ -182,6 +189,75 @@ it('searchOriginals supports anonymous viewers', async () => {
       const missing = await repository.getUserById('99999999-9999-4999-8999-999999999999');
       expect(missing).toBeNull();
     });
+it('hides posts, replies, media, and profiles belonging to deactivated users', async () => {
+  const userId = randomUUID();
+  const originalPostId = randomUUID();
+  const replyPostId = randomUUID();
+  const uniqueMarker = `deactivatedvisibility${randomUUID().replace(/-/g, '')}`;
+
+  // Track IDs before inserting so cleanup can run even after a partial failure.
+  createdUserIds.push(userId);
+  createdPostIds.push(originalPostId, replyPostId);
+
+  await db.insert(users).values({
+    id: userId,
+    handle: `inactive_${userId.replace(/-/g, '').slice(0, 20)}`,
+    displayName: 'Deactivated Test User',
+    deactivatedAt: new Date(),
+  });
+
+  await db.insert(posts).values([
+    {
+      id: originalPostId,
+      authorId: userId,
+      kind: 'original',
+      text: uniqueMarker,
+    },
+    {
+      id: replyPostId,
+      authorId: userId,
+      kind: 'reply',
+      text: uniqueMarker,
+      replyToId: postWithRepliesId,
+    },
+  ]);
+
+  await db.insert(postMedia).values({
+    id: randomUUID(),
+    postId: originalPostId,
+    position: 0,
+    smallUrl: 'https://example.com/test-small.jpg',
+    largeUrl: 'https://example.com/test-large.jpg',
+    width: 100,
+    height: 100,
+    altText: 'Test media',
+  });
+
+  const feed = await repository.listOriginalFeed(null, 100, null);
+  const detail = await repository.getPostById(originalPostId, null);
+  const replies = await repository.listReplies(
+    postWithRepliesId,
+    null,
+    100,
+    null,
+  );
+  const media = await repository.listProfileMedia(userId, null, 10);
+  const search = await repository.searchOriginals(
+    uniqueMarker,
+    null,
+    10,
+    null,
+  );
+  const profile = await repository.getUserById(userId);
+
+  expect(feed.items.some((post) => post.id === originalPostId)).toBe(false);
+  expect(detail).toBeNull();
+  expect(replies.items.some((reply) => reply.id === replyPostId)).toBe(false);
+  expect(media.items).toHaveLength(0);
+  expect(search.items.some((post) => post.id === originalPostId)).toBe(false);
+  expect(profile).toBeNull();
+});
+
   });
 
   describe('Write Use Cases, Constraints & Error Mapping', () => {

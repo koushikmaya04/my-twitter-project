@@ -9,6 +9,9 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { SessionGuard } from './session.guard';
+import type { AuthenticatedRequest } from './authenticated-request';
+import { UseGuards, UnauthorizedException } from '@nestjs/common';
 
 import { AuthService } from './auth.service';
 
@@ -52,6 +55,28 @@ export class AuthController {
     const user = await this.authService.me(request.headers.cookie);
     return { item: user };
   }
+@Post('deactivate')
+@UseGuards(SessionGuard)
+async deactivate(
+  @Req() request: AuthenticatedRequest,
+  @Res({ passthrough: true }) response: Response,
+) {
+  if (!request.user) {
+    throw new UnauthorizedException('Authentication required');
+  }
+
+  await this.authService.deactivate(request.user.id);
+
+  response.clearCookie('session', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
+
+  return { item: { deactivated: true } };
+}
+
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)

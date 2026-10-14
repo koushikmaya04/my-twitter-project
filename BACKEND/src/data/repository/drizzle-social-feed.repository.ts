@@ -6,25 +6,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import {
-  and,
-  desc,
-  eq,
-  inArray,
-  lt,
-  or,
-  sql,
-  isNull,
-} from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql, isNull } from 'drizzle-orm';
 
 import { DATABASE } from '../../database/database.provider';
-import {
-  follows,
-  likes,
-  postMedia,
-  posts,
-  users,
-} from '../../database/schema';
+import { follows, likes, postMedia, posts, users } from '../../database/schema';
 
 import type {
   SocialFeedRepository,
@@ -46,9 +31,7 @@ import {
 } from '../../common/errors/domain-errors';
 
 @Injectable()
-export class DrizzleSocialFeedRepository
-  implements SocialFeedRepository
-{
+export class DrizzleSocialFeedRepository implements SocialFeedRepository {
   constructor(
     @Inject(DATABASE)
     private readonly db: any,
@@ -72,8 +55,7 @@ export class DrizzleSocialFeedRepository
       return;
     }
 
-    const delay =
-      this.configService.get<number>('simulatedIoMs') ?? 0;
+    const delay = this.configService.get<number>('simulatedIoMs') ?? 0;
 
     if (delay <= 0) {
       return;
@@ -84,10 +66,7 @@ export class DrizzleSocialFeedRepository
     });
   }
 
-  private encodeCursor(
-    createdAt: Date,
-    id: string,
-  ): string {
+  private encodeCursor(createdAt: Date, id: string): string {
     return Buffer.from(
       JSON.stringify({
         v: 1,
@@ -167,22 +146,17 @@ export class DrizzleSocialFeedRepository
       .where(inArray(posts.replyToId, postIds))
       .groupBy(posts.replyToId);
 
-
-// 4. Batch Viewer Likes Query
-const viewerLikeRows = viewerId
-  ? await executor
-      .select({
-        postId: likes.postId,
-      })
-      .from(likes)
-      .where(
-        and(
-          eq(likes.userId, viewerId),
-          inArray(likes.postId, postIds),
-        ),
-      )
-  : [];
-
+    // 4. Batch Viewer Likes Query
+    const viewerLikeRows = viewerId
+      ? await executor
+          .select({
+            postId: likes.postId,
+          })
+          .from(likes)
+          .where(
+            and(eq(likes.userId, viewerId), inArray(likes.postId, postIds)),
+          )
+      : [];
 
     const mediaByPost = new Map<string, MediaRecord[]>();
     for (const media of mediaRows) {
@@ -255,6 +229,7 @@ const viewerLikeRows = viewerId
 
     const conditions = [
       eq(posts.kind, 'original'),
+      isNull(users.deactivatedAt),
     ];
 
     if (cursorValue) {
@@ -283,15 +258,9 @@ const viewerLikeRows = viewerId
         displayName: users.displayName,
       })
       .from(posts)
-      .innerJoin(
-        users,
-        eq(posts.authorId, users.id),
-      )
+      .innerJoin(users, eq(posts.authorId, users.id))
       .where(and(...conditions))
-      .orderBy(
-        desc(posts.createdAt),
-        desc(posts.id),
-      )
+      .orderBy(desc(posts.createdAt), desc(posts.id))
       .limit(limit + 1);
 
     const hasMore = rows.length > limit;
@@ -299,18 +268,15 @@ const viewerLikeRows = viewerId
 
     const items = await this.hydratePosts(pageRows, viewerId);
 
-    const lastRow =
-      pageRows[pageRows.length - 1];
+    const lastRow = pageRows[pageRows.length - 1];
 
     return {
       items,
       hasMore,
-      nextCursor: hasMore && lastRow
-        ? this.encodeCursor(
-            lastRow.createdAt,
-            lastRow.id,
-          )
-        : null,
+      nextCursor:
+        hasMore && lastRow
+          ? this.encodeCursor(lastRow.createdAt, lastRow.id)
+          : null,
     };
   }
 
@@ -333,11 +299,8 @@ const viewerLikeRows = viewerId
         displayName: users.displayName,
       })
       .from(posts)
-      .innerJoin(
-        users,
-        eq(posts.authorId, users.id),
-      )
-      .where(eq(posts.id, id))
+      .innerJoin(users, eq(posts.authorId, users.id))
+      .where(and(eq(posts.id, id), isNull(users.deactivatedAt)))
       .limit(1);
 
     if (result.length === 0) {
@@ -357,9 +320,7 @@ const viewerLikeRows = viewerId
         largeUrl: postMedia.largeUrl,
       })
       .from(postMedia)
-      .where(
-        eq(postMedia.postId, id),
-      )
+      .where(eq(postMedia.postId, id))
       .orderBy(postMedia.position);
 
     const likeCount = await executor
@@ -367,33 +328,24 @@ const viewerLikeRows = viewerId
         count: sql<number>`count(*)::int`,
       })
       .from(likes)
-      .where(
-        eq(likes.postId, id),
-      );
+      .where(eq(likes.postId, id));
 
     const replyCount = await executor
       .select({
         count: sql<number>`count(*)::int`,
       })
       .from(posts)
-      .where(
-        eq(posts.replyToId, id),
-      );
+      .where(eq(posts.replyToId, id));
 
-  const viewerLike = viewerId
-  ? await executor
-      .select({
-        postId: likes.postId,
-      })
-      .from(likes)
-      .where(
-        and(
-          eq(likes.userId, viewerId),
-          eq(likes.postId, id),
-        ),
-      )
-      .limit(1)
-  : [];
+    const viewerLike = viewerId
+      ? await executor
+          .select({
+            postId: likes.postId,
+          })
+          .from(likes)
+          .where(and(eq(likes.userId, viewerId), eq(likes.postId, id)))
+          .limit(1)
+      : [];
 
     return {
       id: post.id,
@@ -436,6 +388,7 @@ const viewerLikeRows = viewerId
     const conditions = [
       eq(posts.kind, 'reply'),
       eq(posts.replyToId, postId),
+      isNull(users.deactivatedAt),
     ];
 
     if (cursorValue) {
@@ -465,10 +418,7 @@ const viewerLikeRows = viewerId
       .from(posts)
       .innerJoin(users, eq(posts.authorId, users.id))
       .where(and(...conditions))
-      .orderBy(
-        desc(posts.createdAt),
-        desc(posts.id),
-      )
+      .orderBy(desc(posts.createdAt), desc(posts.id))
       .limit(limit + 1);
 
     const hasMore = rows.length > limit;
@@ -481,12 +431,10 @@ const viewerLikeRows = viewerId
     return {
       items,
       hasMore,
-      nextCursor: hasMore && lastRow
-        ? this.encodeCursor(
-            lastRow.createdAt,
-            lastRow.id,
-          )
-        : null,
+      nextCursor:
+        hasMore && lastRow
+          ? this.encodeCursor(lastRow.createdAt, lastRow.id)
+          : null,
     };
   }
 
@@ -510,6 +458,7 @@ const viewerLikeRows = viewerId
     const conditions = [
       eq(posts.authorId, userId),
       eq(posts.kind, 'original'),
+      isNull(users.deactivatedAt),
     ];
 
     if (cursorValue) {
@@ -536,15 +485,10 @@ const viewerLikeRows = viewerId
         createdAt: posts.createdAt,
       })
       .from(postMedia)
-      .innerJoin(
-        posts,
-        eq(postMedia.postId, posts.id),
-      )
+      .innerJoin(posts, eq(postMedia.postId, posts.id))
+      .innerJoin(users, eq(posts.authorId, users.id))
       .where(and(...conditions))
-      .orderBy(
-        desc(posts.createdAt),
-        desc(postMedia.id),
-      )
+      .orderBy(desc(posts.createdAt), desc(postMedia.id))
       .limit(limit + 1);
 
     const hasMore = rows.length > limit;
@@ -565,12 +509,10 @@ const viewerLikeRows = viewerId
     return {
       items,
       hasMore,
-      nextCursor: hasMore && lastRow
-        ? this.encodeCursor(
-            lastRow.createdAt,
-            lastRow.id,
-          )
-        : null,
+      nextCursor:
+        hasMore && lastRow
+          ? this.encodeCursor(lastRow.createdAt, lastRow.id)
+          : null,
     };
   }
 
@@ -598,6 +540,7 @@ const viewerLikeRows = viewerId
 
     const conditions = [
       eq(posts.kind, 'original'),
+      isNull(users.deactivatedAt),
       sql`${posts.text} ILIKE ${`%${safeQuery}%`} ESCAPE '\\'`,
     ];
 
@@ -628,10 +571,7 @@ const viewerLikeRows = viewerId
       .from(posts)
       .innerJoin(users, eq(posts.authorId, users.id))
       .where(and(...conditions))
-      .orderBy(
-        desc(posts.createdAt),
-        desc(posts.id),
-      )
+      .orderBy(desc(posts.createdAt), desc(posts.id))
       .limit(limit + 1);
 
     const hasMore = rows.length > limit;
@@ -644,146 +584,89 @@ const viewerLikeRows = viewerId
     return {
       items,
       hasMore,
-      nextCursor: hasMore && lastRow
-        ? this.encodeCursor(
-            lastRow.createdAt,
-            lastRow.id,
-          )
-        : null,
+      nextCursor:
+        hasMore && lastRow
+          ? this.encodeCursor(lastRow.createdAt, lastRow.id)
+          : null,
     };
   }
 
-  async createPost(
-    command: CreatePostCommand,
-  ): Promise<PostRecord> {
-    const {
-      authorId,
-      kind,
-      text,
-      replyToId,
-      repostOfId,
-    } = command;
+  async createPost(command: CreatePostCommand): Promise<PostRecord> {
+    const { authorId, kind, text, replyToId, repostOfId } = command;
 
-    return this.db.transaction(
-      async (tx: any) => {
-        if (kind === 'reply') {
-          if (!replyToId) {
-            throw new InvalidTargetError(
-              'replyToId is required for reply',
-            );
-          }
-
-          const parent =
-            await tx
-              .select({
-                id: posts.id,
-                kind: posts.kind,
-              })
-              .from(posts)
-              .where(
-                eq(posts.id, replyToId),
-              )
-              .limit(1);
-
-          if (parent.length === 0) {
-            throw new NotFoundDomainError(
-              'Reply target does not exist',
-            );
-          }
-
-          if (
-            parent[0].kind === 'repost'
-          ) {
-            throw new InvalidTargetError(
-              'Cannot reply to a repost',
-            );
-          }
+    return this.db.transaction(async (tx: any) => {
+      if (kind === 'reply') {
+        if (!replyToId) {
+          throw new InvalidTargetError('replyToId is required for reply');
         }
 
-        if (kind === 'repost') {
-          if (!repostOfId) {
-            throw new InvalidTargetError(
-              'repostOfId is required for repost',
-            );
-          }
+        const parent = await tx
+          .select({
+            id: posts.id,
+            kind: posts.kind,
+          })
+          .from(posts)
+          .where(eq(posts.id, replyToId))
+          .limit(1);
 
-          const target =
-            await tx
-              .select({
-                id: posts.id,
-                kind: posts.kind,
-              })
-              .from(posts)
-              .where(
-                eq(posts.id, repostOfId),
-              )
-              .limit(1);
-
-          if (target.length === 0) {
-            throw new NotFoundDomainError(
-              'Repost target does not exist',
-            );
-          }
-
-          if (
-            target[0].kind !== 'original'
-          ) {
-            throw new InvalidTargetError(
-              'Can only repost an original post',
-            );
-          }
+        if (parent.length === 0) {
+          throw new NotFoundDomainError('Reply target does not exist');
         }
 
-        const postId = randomUUID();
+        if (parent[0].kind === 'repost') {
+          throw new InvalidTargetError('Cannot reply to a repost');
+        }
+      }
 
-        try {
-          await tx
-            .insert(posts)
-            .values({
-              id: postId,
-              authorId,
-              kind,
-              text:
-                kind === 'repost'
-                  ? null
-                  : text?.trim() ?? null,
-              replyToId:
-                kind === 'reply'
-                  ? replyToId ?? null
-                  : null,
-              repostOfId:
-                kind === 'repost'
-                  ? repostOfId ?? null
-                  : null,
-            });
-        } catch (error: any) {
-          if (
-            error?.code === '23505' ||
-            error?.cause?.code === '23505'
-          ) {
-            throw new ConflictDomainError(
-              'Duplicate repost is not allowed',
-            );
-          }
-          throw error;
+      if (kind === 'repost') {
+        if (!repostOfId) {
+          throw new InvalidTargetError('repostOfId is required for repost');
         }
 
-        const result =
-          await this.getPostById(
-            postId,
-            authorId,
-            tx,
-          );
+        const target = await tx
+          .select({
+            id: posts.id,
+            kind: posts.kind,
+          })
+          .from(posts)
+          .where(eq(posts.id, repostOfId))
+          .limit(1);
 
-        if (!result) {
-          throw new NotFoundDomainError(
-            'Created post could not be loaded',
-          );
+        if (target.length === 0) {
+          throw new NotFoundDomainError('Repost target does not exist');
         }
 
-        return result;
-      },
-    );
+        if (target[0].kind !== 'original') {
+          throw new InvalidTargetError('Can only repost an original post');
+        }
+      }
+
+      const postId = randomUUID();
+
+      try {
+        await tx.insert(posts).values({
+          id: postId,
+          authorId,
+          kind,
+          text: kind === 'repost' ? null : (text?.trim() ?? null),
+          replyToId: kind === 'reply' ? (replyToId ?? null) : null,
+          repostOfId: kind === 'repost' ? (repostOfId ?? null) : null,
+        });
+      } catch (error: any) {
+        if (error?.code === '23505' || error?.cause?.code === '23505') {
+          throw new ConflictDomainError('Duplicate repost is not allowed');
+        }
+        throw error;
+      }
+
+      const result = await this.getPostById(postId, authorId, tx);
+
+      if (!result) {
+        throw new NotFoundDomainError('Created post could not be loaded');
+      }
+
+      return result;
+    });
   }
 
   async setLike(
@@ -794,19 +677,16 @@ const viewerLikeRows = viewerId
     likedByViewer: boolean;
     likeCount: number;
   }> {
-    const post =
-      await this.db
-        .select({
-          id: posts.id,
-        })
-        .from(posts)
-        .where(eq(posts.id, postId))
-        .limit(1);
+    const post = await this.db
+      .select({
+        id: posts.id,
+      })
+      .from(posts)
+      .where(eq(posts.id, postId))
+      .limit(1);
 
     if (post.length === 0) {
-      throw new NotFoundDomainError(
-        'Post does not exist',
-      );
+      throw new NotFoundDomainError('Post does not exist');
     }
 
     if (desiredState) {
@@ -817,38 +697,20 @@ const viewerLikeRows = viewerId
           postId,
         })
         .onConflictDoNothing({
-          target: [
-            likes.userId,
-            likes.postId,
-          ],
+          target: [likes.userId, likes.postId],
         });
     } else {
       await this.db
         .delete(likes)
-        .where(
-          and(
-            eq(
-              likes.userId,
-              viewerId,
-            ),
-            eq(
-              likes.postId,
-              postId,
-            ),
-          ),
-        );
+        .where(and(eq(likes.userId, viewerId), eq(likes.postId, postId)));
     }
 
-    const [result] =
-      await this.db
-        .select({
-          count:
-            sql<number>`count(*)::int`,
-        })
-        .from(likes)
-        .where(
-          eq(likes.postId, postId),
-        );
+    const [result] = await this.db
+      .select({
+        count: sql<number>`count(*)::int`,
+      })
+      .from(likes)
+      .where(eq(likes.postId, postId));
 
     return {
       likedByViewer: desiredState,
@@ -856,117 +718,100 @@ const viewerLikeRows = viewerId
     };
   }
 
-async getUserById(
-  id: string,
-): Promise<UserRecord | null> {
-  const userResult = await this.db
-    .select({
-      id: users.id,
-      handle: users.handle,
-      displayName: users.displayName,
-      bio: users.bio,
-      avatarSmallUrl: users.avatarSmallUrl,
-      avatarLargeUrl: users.avatarLargeUrl,
-    })
-    .from(users)
-    .where(
-      and(
-        eq(users.id, id),
-        isNull(users.deactivatedAt),
-      ),
-    )
-    .limit(1);
+  async getUserById(id: string): Promise<UserRecord | null> {
+    const userResult = await this.db
+      .select({
+        id: users.id,
+        handle: users.handle,
+        displayName: users.displayName,
+        bio: users.bio,
+        avatarSmallUrl: users.avatarSmallUrl,
+        avatarLargeUrl: users.avatarLargeUrl,
+      })
+      .from(users)
+      .where(and(eq(users.id, id), isNull(users.deactivatedAt)))
+      .limit(1);
 
-  if (userResult.length === 0) {
-    return null;
+    if (userResult.length === 0) {
+      return null;
+    }
+
+    const user = userResult[0];
+
+    const [postCountResult] = await this.db
+      .select({
+        count: sql<number>`count(*)::int`,
+      })
+      .from(posts)
+      .where(and(eq(posts.authorId, id), eq(posts.kind, 'original')));
+
+    const [followerCountResult] = await this.db
+      .select({
+        count: sql<number>`count(*)::int`,
+      })
+      .from(follows)
+      .where(eq(follows.followingId, id));
+
+    const [followingCountResult] = await this.db
+      .select({
+        count: sql<number>`count(*)::int`,
+      })
+      .from(follows)
+      .where(eq(follows.followerId, id));
+
+    return {
+      id: user.id,
+      handle: user.handle,
+      displayName: user.displayName,
+      bio: user.bio,
+      avatar: {
+        smallUrl:
+          user.avatarSmallUrl ?? this.getUserAvatar(user.handle).smallUrl,
+        largeUrl:
+          user.avatarLargeUrl ?? this.getUserAvatar(user.handle).largeUrl,
+      },
+      postCount: Number(postCountResult?.count ?? 0),
+      followerCount: Number(followerCountResult?.count ?? 0),
+      followingCount: Number(followingCountResult?.count ?? 0),
+    };
   }
+  async updateProfile(
+    command: UpdateProfileCommand,
+  ): Promise<UserRecord | null> {
+    const updateValues: Record<string, unknown> = {
+      updatedAt: new Date(),
+    };
 
-  const user = userResult[0];
+    if (command.displayName !== undefined) {
+      updateValues.displayName = command.displayName;
+    }
 
-  const [postCountResult] = await this.db
-    .select({
-      count: sql<number>`count(*)::int`,
-    })
-    .from(posts)
-    .where(
-      and(
-        eq(posts.authorId, id),
-        eq(posts.kind, 'original'),
-      ),
-    );
+    if (command.bio !== undefined) {
+      updateValues.bio = command.bio;
+    }
 
-  const [followerCountResult] = await this.db
-    .select({
-      count: sql<number>`count(*)::int`,
-    })
-    .from(follows)
-    .where(eq(follows.followingId, id));
+    if (command.avatarSmallUrl !== undefined) {
+      updateValues.avatarSmallUrl = command.avatarSmallUrl;
+    }
 
-  const [followingCountResult] = await this.db
-    .select({
-      count: sql<number>`count(*)::int`,
-    })
-    .from(follows)
-    .where(eq(follows.followerId, id));
+    if (command.avatarLargeUrl !== undefined) {
+      updateValues.avatarLargeUrl = command.avatarLargeUrl;
+    }
 
-  return {
-    id: user.id,
-    handle: user.handle,
-    displayName: user.displayName,
-    bio: user.bio,
-    avatar: {
-      smallUrl:
-        user.avatarSmallUrl ?? this.getUserAvatar(user.handle).smallUrl,
-      largeUrl:
-        user.avatarLargeUrl ?? this.getUserAvatar(user.handle).largeUrl,
-    },
-    postCount: Number(postCountResult?.count ?? 0),
-    followerCount: Number(followerCountResult?.count ?? 0),
-    followingCount: Number(followingCountResult?.count ?? 0),
-  };
-}
-async updateProfile(
-  command: UpdateProfileCommand,
-): Promise<UserRecord | null> {
-  const updateValues: Record<string, unknown> = {
-    updatedAt: new Date(),
-  };
+    const [updatedUser] = await this.db
+      .update(users)
+      .set(updateValues)
+      .where(and(eq(users.id, command.userId), isNull(users.deactivatedAt)))
+      .returning({
+        id: users.id,
+      });
 
-  if (command.displayName !== undefined) {
-    updateValues.displayName = command.displayName;
+    if (!updatedUser) {
+      return null;
+    }
+
+    return this.getUserById(command.userId);
   }
-
-  if (command.bio !== undefined) {
-    updateValues.bio = command.bio;
-  }
-
-  if (command.avatarSmallUrl !== undefined) {
-    updateValues.avatarSmallUrl = command.avatarSmallUrl;
-  }
-
-  if (command.avatarLargeUrl !== undefined) {
-    updateValues.avatarLargeUrl = command.avatarLargeUrl;
-  }
-
-  const [updatedUser] = await this.db
-    .update(users)
-    .set(updateValues)
-    .where(
-      and(
-        eq(users.id, command.userId),
-        isNull(users.deactivatedAt),
-      ),
-    )
-    .returning({
-      id: users.id,
-    });
-
-  if (!updatedUser) {
-    return null;
-  }
-
-  return this.getUserById(command.userId);
-}
   private getUserAvatar(handle: string) {
     const cleanHandle = handle.toLowerCase().replace(/^@/, '').trim();
     return {

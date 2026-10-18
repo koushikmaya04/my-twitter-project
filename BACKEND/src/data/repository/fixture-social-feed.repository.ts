@@ -11,6 +11,7 @@ import type { SocialFeedReadFailure } from './social-feed-read-failure.token';
 import type {
   CreatePostCommand,
   MediaRecord,
+  FollowUserRecord,
   PaginatedResult,
   PostRecord,
   SocialFeedRepository,
@@ -30,9 +31,7 @@ import {
 import { validateCursor } from '../../common/cursor-validation/cursor.validation';
 
 @Injectable()
-export class FixtureSocialFeedRepository
-  implements SocialFeedRepository
-{
+export class FixtureSocialFeedRepository implements SocialFeedRepository {
   constructor(
     private readonly configService: ConfigService,
 
@@ -70,8 +69,7 @@ export class FixtureSocialFeedRepository
 
     filteredPosts.sort((a, b) => {
       const dateDifference =
-        new Date(b.createdAt).getTime() -
-        new Date(a.createdAt).getTime();
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 
       if (dateDifference !== 0) {
         return dateDifference;
@@ -85,18 +83,13 @@ export class FixtureSocialFeedRepository
 
       filteredPosts = filteredPosts.filter((post) => {
         const postTime = new Date(post.createdAt).getTime();
-        const cursorTime = new Date(
-          decodedCursor.createdAt,
-        ).getTime();
+        const cursorTime = new Date(decodedCursor.createdAt).getTime();
 
         if (postTime < cursorTime) {
           return true;
         }
 
-        if (
-          postTime === cursorTime &&
-          post.id < decodedCursor.id
-        ) {
+        if (postTime === cursorTime && post.id < decodedCursor.id) {
           return true;
         }
 
@@ -141,9 +134,7 @@ export class FixtureSocialFeedRepository
     return this.toPostRecord(post, viewerId);
   }
 
-  async getUserById(
-    id: string,
-  ): Promise<UserRecord | null> {
+  async getUserById(id: string): Promise<UserRecord | null> {
     this.checkReadFailure();
     await this.waitIfConfigured();
     const user = users.find((item) => item.id === id);
@@ -156,37 +147,35 @@ export class FixtureSocialFeedRepository
   }
 
   async updateProfile(
-  command: UpdateProfileCommand,
-): Promise<UserRecord | null> {
-  await this.waitIfConfigured();
-  this.checkReadFailure();
+    command: UpdateProfileCommand,
+  ): Promise<UserRecord | null> {
+    await this.waitIfConfigured();
+    this.checkReadFailure();
 
-  const user = users.find(
-    (item) => item.id === command.userId,
-  );
+    const user = users.find((item) => item.id === command.userId);
 
-  if (!user) {
-    return null;
+    if (!user) {
+      return null;
+    }
+
+    if (command.displayName !== undefined) {
+      user.displayName = command.displayName;
+    }
+
+    if (command.bio !== undefined) {
+      user.bio = command.bio;
+    }
+
+    if (command.avatarSmallUrl !== undefined) {
+      user.avatar.smallUrl = command.avatarSmallUrl ?? '';
+    }
+
+    if (command.avatarLargeUrl !== undefined) {
+      user.avatar.largeUrl = command.avatarLargeUrl ?? '';
+    }
+
+    return this.toUserRecord(user);
   }
-
-  if (command.displayName !== undefined) {
-    user.displayName = command.displayName;
-  }
-
-  if (command.bio !== undefined) {
-    user.bio = command.bio;
-  }
-
-  if (command.avatarSmallUrl !== undefined) {
-    user.avatar.smallUrl = command.avatarSmallUrl ?? '';
-  }
-
-  if (command.avatarLargeUrl !== undefined) {
-    user.avatar.largeUrl = command.avatarLargeUrl ?? '';
-  }
-
-  return this.toUserRecord(user);
-}
 
   async listReplies(
     postId: string,
@@ -375,9 +364,7 @@ export class FixtureSocialFeedRepository
     };
   }
 
-  async createPost(
-    command: CreatePostCommand,
-  ): Promise<PostRecord> {
+  async createPost(command: CreatePostCommand): Promise<PostRecord> {
     await this.waitIfConfigured();
     const newPost = {
       id: 'fixture-created-post-id',
@@ -404,7 +391,161 @@ export class FixtureSocialFeedRepository
     const currentCount = likes.filter((l) => l.postId === postId).length;
     return {
       likedByViewer: desiredState,
-      likeCount: desiredState ? currentCount + 1 : Math.max(0, currentCount - 1),
+      likeCount: desiredState
+        ? currentCount + 1
+        : Math.max(0, currentCount - 1),
+    };
+  }
+
+  async setFollow(
+    followerId: string,
+    followingId: string,
+    desiredState: boolean,
+  ): Promise<{
+    following: boolean;
+    followerCount: number;
+    followingCount: number;
+  }> {
+    await this.waitIfConfigured();
+    this.checkReadFailure();
+
+    if (followerId === followingId) {
+      throw new Error('A user cannot follow themselves');
+    }
+
+    const follower = users.find((user) => user.id === followerId);
+    const target = users.find((user) => user.id === followingId);
+
+    if (!follower || !target) {
+      throw new Error('Follow target or follower not found');
+    }
+
+    const existingIndex = follows.findIndex(
+      (follow) =>
+        follow.followerId === followerId && follow.followingId === followingId,
+    );
+
+    if (desiredState && existingIndex === -1) {
+      follows.push({
+        followerId,
+        followingId,
+        createdAt: new Date().toISOString(),
+      });
+    } else if (!desiredState && existingIndex !== -1) {
+      follows.splice(existingIndex, 1);
+    }
+
+    return {
+      following: follows.some(
+        (follow) =>
+          follow.followerId === followerId &&
+          follow.followingId === followingId,
+      ),
+      followerCount: follows.filter(
+        (follow) => follow.followingId === followingId,
+      ).length,
+      followingCount: follows.filter(
+        (follow) => follow.followerId === followerId,
+      ).length,
+    };
+  }
+
+  async isFollowing(followerId: string, followingId: string): Promise<boolean> {
+    this.checkReadFailure();
+    await this.waitIfConfigured();
+
+    return follows.some(
+      (follow) =>
+        follow.followerId === followerId && follow.followingId === followingId,
+    );
+  }
+
+  async listFollowers(
+    userId: string,
+    cursor: string | null,
+    limit: number,
+  ): Promise<PaginatedResult<FollowUserRecord>> {
+    return this.listFollowUsers(userId, cursor, limit, 'followers');
+  }
+
+  async listFollowing(
+    userId: string,
+    cursor: string | null,
+    limit: number,
+  ): Promise<PaginatedResult<FollowUserRecord>> {
+    return this.listFollowUsers(userId, cursor, limit, 'following');
+  }
+
+  private async listFollowUsers(
+    userId: string,
+    cursor: string | null,
+    limit: number,
+    direction: 'followers' | 'following',
+  ): Promise<PaginatedResult<FollowUserRecord>> {
+    this.checkReadFailure();
+    await this.waitIfConfigured();
+
+    if (!users.some((user) => user.id === userId)) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
+    const decoded = cursor ? validateCursor(cursor) : null;
+
+    const items = follows
+      .filter((follow) =>
+        direction === 'followers'
+          ? follow.followingId === userId
+          : follow.followerId === userId,
+      )
+      .map((follow) => {
+        const personId =
+          direction === 'followers' ? follow.followerId : follow.followingId;
+
+        const user = users.find((item) => item.id === personId);
+
+        return user
+          ? {
+              id: user.id,
+              handle: user.handle,
+              displayName: user.displayName,
+              bio: user.bio,
+              avatar: {
+                smallUrl: user.avatar.smallUrl,
+                largeUrl: user.avatar.largeUrl,
+              },
+              followedAt: follow.createdAt,
+            }
+          : null;
+      })
+      .filter((item): item is FollowUserRecord => item !== null)
+      .sort((a, b) => {
+        const timeComparison = b.followedAt.localeCompare(a.followedAt);
+
+        return timeComparison !== 0 ? timeComparison : b.id.localeCompare(a.id);
+      })
+      .filter((item) => {
+        if (!decoded) return true;
+
+        return (
+          item.followedAt < decoded.createdAt ||
+          (item.followedAt === decoded.createdAt &&
+            item.id.localeCompare(decoded.id) < 0)
+        );
+      });
+
+    const page = items.slice(0, limit + 1);
+    const hasMore = page.length > limit;
+    const pageItems = page.slice(0, limit);
+
+    const lastItem = pageItems[pageItems.length - 1];
+
+    return {
+      items: pageItems,
+      hasMore,
+      nextCursor:
+        hasMore && lastItem
+          ? this.encodeCursor(lastItem.followedAt, lastItem.id)
+          : null,
     };
   }
 
@@ -412,14 +553,10 @@ export class FixtureSocialFeedRepository
     post: (typeof posts)[number],
     viewerId: string | null,
   ): PostRecord {
-    const author = users.find(
-      (user) => user.id === post.authorId,
-    );
+    const author = users.find((user) => user.id === post.authorId);
 
     if (!author) {
-      throw new Error(
-        `Fixture author not found: ${post.authorId}`,
-      );
+      throw new Error(`Fixture author not found: ${post.authorId}`);
     }
 
     const postMedia: MediaRecord[] = media
@@ -435,23 +572,15 @@ export class FixtureSocialFeedRepository
         largeUrl: item.largeUrl,
       }));
 
-    const likeCount = likes.filter(
-      (like) => like.postId === post.id,
-    ).length;
+    const likeCount = likes.filter((like) => like.postId === post.id).length;
 
     const replyCount = posts.filter(
-      (item) =>
-        item.kind === 'reply' &&
-        item.replyToId === post.id,
+      (item) => item.kind === 'reply' && item.replyToId === post.id,
     ).length;
 
-const likedByViewer =
-  viewerId !== null &&
-  likes.some(
-    (like) =>
-      like.postId === post.id &&
-      like.userId === viewerId,
-  );
+    const likedByViewer =
+      viewerId !== null &&
+      likes.some((like) => like.postId === post.id && like.userId === viewerId);
 
     return {
       id: post.id,
@@ -476,9 +605,7 @@ const likedByViewer =
     };
   }
 
-  private toUserRecord(
-    user: (typeof users)[number],
-  ): UserRecord {
+  private toUserRecord(user: (typeof users)[number]): UserRecord {
     const postCount = originalPosts.filter(
       (post) => post.authorId === user.id,
     ).length;
@@ -506,10 +633,7 @@ const likedByViewer =
     };
   }
 
-  private encodeCursor(
-    createdAt: string,
-    id: string,
-  ): string {
+  private encodeCursor(createdAt: string, id: string): string {
     const payload = JSON.stringify({
       v: 1,
       createdAt,

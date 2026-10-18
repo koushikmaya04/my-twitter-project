@@ -8,7 +8,13 @@ import {
   ConflictDomainError,
 } from '../src/common/errors/domain-errors';
 import { randomUUID } from 'node:crypto';
-import { posts, likes, users, postMedia } from '../src/database/schema';
+import {
+  posts,
+  likes,
+  users,
+  postMedia,
+  follows,
+} from '../src/database/schema';
 import { eq, and } from 'drizzle-orm';
 
 describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
@@ -38,20 +44,20 @@ describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
     repository = new DrizzleSocialFeedRepository(db);
   });
 
- afterAll(async () => {
-  if (createdPostIds.length > 0) {
-    for (const id of [...createdPostIds].reverse()) {
-      await db.delete(likes).where(eq(likes.postId, id));
-      await db.delete(posts).where(eq(posts.id, id));
+  afterAll(async () => {
+    if (createdPostIds.length > 0) {
+      for (const id of [...createdPostIds].reverse()) {
+        await db.delete(likes).where(eq(likes.postId, id));
+        await db.delete(posts).where(eq(posts.id, id));
+      }
     }
-  }
 
-  for (const id of createdUserIds) {
-    await db.delete(users).where(eq(users.id, id));
-  }
+    for (const id of createdUserIds) {
+      await db.delete(users).where(eq(users.id, id));
+    }
 
-  await pool.end();
-});
+    await pool.end();
+  });
 
   describe('Read Use Cases & Cursor Pagination', () => {
     it('listOriginalFeed returns originals with batch counts and viewer state', async () => {
@@ -70,62 +76,66 @@ describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
         expect(item.author.handle).toBeDefined();
       }
     });
-it('listOriginalFeed supports anonymous viewers', async () => {
-  const result = await repository.listOriginalFeed(null, 10, null);
+    it('listOriginalFeed supports anonymous viewers', async () => {
+      const result = await repository.listOriginalFeed(null, 10, null);
 
-  expect(result.items.length).toBeGreaterThan(0);
+      expect(result.items.length).toBeGreaterThan(0);
 
-  for (const item of result.items) {
-    expect(item.kind).toBe('original');
-    expect(typeof item.likeCount).toBe('number');
-    expect(item.likedByViewer).toBe(false);
-  }
-});
-it('getPostById supports anonymous viewers', async () => {
-  const result = await repository.getPostById(postWithRepliesId, null);
+      for (const item of result.items) {
+        expect(item.kind).toBe('original');
+        expect(typeof item.likeCount).toBe('number');
+        expect(item.likedByViewer).toBe(false);
+      }
+    });
+    it('getPostById supports anonymous viewers', async () => {
+      const result = await repository.getPostById(postWithRepliesId, null);
 
-  expect(result).not.toBeNull();
-  expect(result?.likedByViewer).toBe(false);
-  expect(typeof result?.likeCount).toBe('number');
-});
-it('listReplies supports anonymous viewers', async () => {
-  const result = await repository.listReplies(
-    postWithRepliesId,
-    null,
-    10,
-    null,
-  );
+      expect(result).not.toBeNull();
+      expect(result?.likedByViewer).toBe(false);
+      expect(typeof result?.likeCount).toBe('number');
+    });
+    it('listReplies supports anonymous viewers', async () => {
+      const result = await repository.listReplies(
+        postWithRepliesId,
+        null,
+        10,
+        null,
+      );
 
-  expect(result.items.length).toBeGreaterThan(0);
+      expect(result.items.length).toBeGreaterThan(0);
 
-  for (const reply of result.items) {
-    expect(reply.kind).toBe('reply');
-    expect(reply.likedByViewer).toBe(false);
-  }
-});
+      for (const reply of result.items) {
+        expect(reply.kind).toBe('reply');
+        expect(reply.likedByViewer).toBe(false);
+      }
+    });
 
-it('searchOriginals supports anonymous viewers', async () => {
-  const result = await repository.searchOriginals(
-    'database',
-    null,
-    10,
-    null,
-  );
+    it('searchOriginals supports anonymous viewers', async () => {
+      const result = await repository.searchOriginals(
+        'database',
+        null,
+        10,
+        null,
+      );
 
-  expect(result.items.length).toBeGreaterThan(0);
+      expect(result.items.length).toBeGreaterThan(0);
 
-  for (const item of result.items) {
-    expect(item.kind).toBe('original');
-    expect(item.text?.toLowerCase()).toContain('database');
-    expect(item.likedByViewer).toBe(false);
-  }
-});
+      for (const item of result.items) {
+        expect(item.kind).toBe('original');
+        expect(item.text?.toLowerCase()).toContain('database');
+        expect(item.likedByViewer).toBe(false);
+      }
+    });
 
     it('listOriginalFeed continues with nextCursor without duplicates', async () => {
       const page1 = await repository.listOriginalFeed(null, 5, ashaId);
       expect(page1.nextCursor).not.toBeNull();
 
-      const page2 = await repository.listOriginalFeed(page1.nextCursor, 5, ashaId);
+      const page2 = await repository.listOriginalFeed(
+        page1.nextCursor,
+        5,
+        ashaId,
+      );
 
       const page1Ids = page1.items.map((p) => p.id);
       const page2Ids = page2.items.map((p) => p.id);
@@ -165,7 +175,12 @@ it('searchOriginals supports anonymous viewers', async () => {
     });
 
     it('searchOriginals performs case-insensitive literal search with escaping', async () => {
-      const result = await repository.searchOriginals('database', null, 10, ashaId);
+      const result = await repository.searchOriginals(
+        'database',
+        null,
+        10,
+        ashaId,
+      );
 
       expect(result.items.length).toBeGreaterThan(0);
       for (const item of result.items) {
@@ -174,7 +189,12 @@ it('searchOriginals supports anonymous viewers', async () => {
       }
 
       // Escaping test: search with special characters should not throw SQL syntax errors
-      const escapedResult = await repository.searchOriginals('%_test\\', null, 10, ashaId);
+      const escapedResult = await repository.searchOriginals(
+        '%_test\\',
+        null,
+        10,
+        ashaId,
+      );
       expect(escapedResult.items).toEqual([]);
     });
 
@@ -186,78 +206,221 @@ it('searchOriginals supports anonymous viewers', async () => {
       expect(user?.followerCount).toBeGreaterThanOrEqual(0);
       expect(user?.followingCount).toBeGreaterThanOrEqual(0);
 
-      const missing = await repository.getUserById('99999999-9999-4999-8999-999999999999');
+      const missing = await repository.getUserById(
+        '99999999-9999-4999-8999-999999999999',
+      );
       expect(missing).toBeNull();
     });
-it('hides posts, replies, media, and profiles belonging to deactivated users', async () => {
-  const userId = randomUUID();
-  const originalPostId = randomUUID();
-  const replyPostId = randomUUID();
-  const uniqueMarker = `deactivatedvisibility${randomUUID().replace(/-/g, '')}`;
+    it('hides posts, replies, media, and profiles belonging to deactivated users', async () => {
+      const userId = randomUUID();
+      const originalPostId = randomUUID();
+      const replyPostId = randomUUID();
+      const uniqueMarker = `deactivatedvisibility${randomUUID().replace(/-/g, '')}`;
 
-  // Track IDs before inserting so cleanup can run even after a partial failure.
-  createdUserIds.push(userId);
-  createdPostIds.push(originalPostId, replyPostId);
+      // Track IDs before inserting so cleanup can run even after a partial failure.
+      createdUserIds.push(userId);
+      createdPostIds.push(originalPostId, replyPostId);
 
-  await db.insert(users).values({
-    id: userId,
-    handle: `inactive_${userId.replace(/-/g, '').slice(0, 20)}`,
-    displayName: 'Deactivated Test User',
-    deactivatedAt: new Date(),
+      await db.insert(users).values({
+        id: userId,
+        handle: `inactive_${userId.replace(/-/g, '').slice(0, 20)}`,
+        displayName: 'Deactivated Test User',
+        deactivatedAt: new Date(),
+      });
+
+      await db.insert(posts).values([
+        {
+          id: originalPostId,
+          authorId: userId,
+          kind: 'original',
+          text: uniqueMarker,
+        },
+        {
+          id: replyPostId,
+          authorId: userId,
+          kind: 'reply',
+          text: uniqueMarker,
+          replyToId: postWithRepliesId,
+        },
+      ]);
+
+      await db.insert(postMedia).values({
+        id: randomUUID(),
+        postId: originalPostId,
+        position: 0,
+        smallUrl: 'https://example.com/test-small.jpg',
+        largeUrl: 'https://example.com/test-large.jpg',
+        width: 100,
+        height: 100,
+        altText: 'Test media',
+      });
+
+      const feed = await repository.listOriginalFeed(null, 100, null);
+      const detail = await repository.getPostById(originalPostId, null);
+      const replies = await repository.listReplies(
+        postWithRepliesId,
+        null,
+        100,
+        null,
+      );
+      const media = await repository.listProfileMedia(userId, null, 10);
+      const search = await repository.searchOriginals(
+        uniqueMarker,
+        null,
+        10,
+        null,
+      );
+      const profile = await repository.getUserById(userId);
+
+      expect(feed.items.some((post) => post.id === originalPostId)).toBe(false);
+      expect(detail).toBeNull();
+      expect(replies.items.some((reply) => reply.id === replyPostId)).toBe(
+        false,
+      );
+      expect(media.items).toHaveLength(0);
+      expect(search.items.some((post) => post.id === originalPostId)).toBe(
+        false,
+      );
+      expect(profile).toBeNull();
+    });
   });
 
-  await db.insert(posts).values([
-    {
-      id: originalPostId,
-      authorId: userId,
-      kind: 'original',
-      text: uniqueMarker,
-    },
-    {
-      id: replyPostId,
-      authorId: userId,
-      kind: 'reply',
-      text: uniqueMarker,
-      replyToId: postWithRepliesId,
-    },
-  ]);
+  describe('Follows: Idempotency & Pagination', () => {
+    let followerId: string;
+    let targetId: string;
+    let otherFollowerId: string;
 
-  await db.insert(postMedia).values({
-    id: randomUUID(),
-    postId: originalPostId,
-    position: 0,
-    smallUrl: 'https://example.com/test-small.jpg',
-    largeUrl: 'https://example.com/test-large.jpg',
-    width: 100,
-    height: 100,
-    altText: 'Test media',
-  });
+    beforeAll(async () => {
+      followerId = randomUUID();
+      targetId = randomUUID();
+      otherFollowerId = randomUUID();
 
-  const feed = await repository.listOriginalFeed(null, 100, null);
-  const detail = await repository.getPostById(originalPostId, null);
-  const replies = await repository.listReplies(
-    postWithRepliesId,
-    null,
-    100,
-    null,
-  );
-  const media = await repository.listProfileMedia(userId, null, 10);
-  const search = await repository.searchOriginals(
-    uniqueMarker,
-    null,
-    10,
-    null,
-  );
-  const profile = await repository.getUserById(userId);
+      createdUserIds.push(followerId, targetId, otherFollowerId);
 
-  expect(feed.items.some((post) => post.id === originalPostId)).toBe(false);
-  expect(detail).toBeNull();
-  expect(replies.items.some((reply) => reply.id === replyPostId)).toBe(false);
-  expect(media.items).toHaveLength(0);
-  expect(search.items.some((post) => post.id === originalPostId)).toBe(false);
-  expect(profile).toBeNull();
-});
+      await db.insert(users).values([
+        {
+          id: followerId,
+          handle: `follower_${followerId.replace(/-/g, '').slice(0, 20)}`,
+          displayName: 'Integration Follower',
+        },
+        {
+          id: targetId,
+          handle: `target_${targetId.replace(/-/g, '').slice(0, 20)}`,
+          displayName: 'Integration Target',
+        },
+        {
+          id: otherFollowerId,
+          handle: `other_${otherFollowerId.replace(/-/g, '').slice(0, 20)}`,
+          displayName: 'Integration Other Follower',
+        },
+      ]);
+    });
 
+    it('makes follow and unfollow idempotent and returns accurate counts', async () => {
+      const firstFollow = await repository.setFollow(
+        followerId,
+        targetId,
+        true,
+      );
+
+      expect(firstFollow).toEqual({
+        following: true,
+        followerCount: 1,
+        followingCount: 1,
+      });
+
+      const repeatedFollow = await repository.setFollow(
+        followerId,
+        targetId,
+        true,
+      );
+
+      expect(repeatedFollow).toEqual(firstFollow);
+      expect(await repository.isFollowing(followerId, targetId)).toBe(true);
+
+      const firstUnfollow = await repository.setFollow(
+        followerId,
+        targetId,
+        false,
+      );
+
+      expect(firstUnfollow).toEqual({
+        following: false,
+        followerCount: 0,
+        followingCount: 0,
+      });
+
+      const repeatedUnfollow = await repository.setFollow(
+        followerId,
+        targetId,
+        false,
+      );
+
+      expect(repeatedUnfollow).toEqual(firstUnfollow);
+      expect(await repository.isFollowing(followerId, targetId)).toBe(false);
+    });
+
+    it('rejects self-follow', async () => {
+      await expect(
+        repository.setFollow(followerId, followerId, true),
+      ).rejects.toBeInstanceOf(InvalidTargetError);
+    });
+
+    it('paginates followers without duplicates across consecutive pages', async () => {
+      await repository.setFollow(followerId, targetId, true);
+      await repository.setFollow(otherFollowerId, targetId, true);
+
+      const firstPage = await repository.listFollowers(targetId, null, 1);
+
+      expect(firstPage.items).toHaveLength(1);
+      expect(firstPage.hasMore).toBe(true);
+      expect(firstPage.nextCursor).not.toBeNull();
+
+      const secondPage = await repository.listFollowers(
+        targetId,
+        firstPage.nextCursor,
+        1,
+      );
+
+      expect(secondPage.items).toHaveLength(1);
+      expect(secondPage.hasMore).toBe(false);
+      expect(secondPage.nextCursor).toBeNull();
+
+      expect(firstPage.items[0].id).not.toBe(secondPage.items[0].id);
+      expect(
+        new Set([firstPage.items[0].id, secondPage.items[0].id]).size,
+      ).toBe(2);
+    });
+
+    it('excludes deactivated accounts from follower and following lists', async () => {
+      const inactiveId = randomUUID();
+
+      createdUserIds.push(inactiveId);
+
+      await db.insert(users).values({
+        id: inactiveId,
+        handle: `inactive_${inactiveId.replace(/-/g, '').slice(0, 20)}`,
+        displayName: 'Inactive Follower',
+        deactivatedAt: new Date(),
+      });
+
+      await repository.setFollow(followerId, targetId, true);
+
+      // The inactive account can have an existing relationship in the database.
+      await db.insert(follows).values({
+        followerId: inactiveId,
+        followingId: targetId,
+      });
+      const followers = await repository.listFollowers(targetId, null, 10);
+
+      expect(followers.items.some((user) => user.id === inactiveId)).toBe(
+        false,
+      );
+
+      await expect(
+        repository.listFollowing(inactiveId, null, 10),
+      ).rejects.toBeInstanceOf(NotFoundDomainError);
+    });
   });
 
   describe('Write Use Cases, Constraints & Error Mapping', () => {
@@ -408,7 +571,11 @@ it('hides posts, replies, media, and profiles belonging to deactivated users', a
 
     it('setLike throws NotFoundDomainError for non-existent post', async () => {
       await expect(
-        repository.setLike('99999999-9999-4999-8999-999999999999', ashaId, true),
+        repository.setLike(
+          '99999999-9999-4999-8999-999999999999',
+          ashaId,
+          true,
+        ),
       ).rejects.toThrow(NotFoundDomainError);
     });
 
@@ -457,7 +624,7 @@ it('hides posts, replies, media, and profiles belonging to deactivated users', a
             text: 'Temporary post should be rolled back',
           });
 
-           // 2. Deliberate failure: violation of duplicate primary key
+          // 2. Deliberate failure: violation of duplicate primary key
           await tx.insert(posts).values({
             id: rollbackPostId,
             authorId: ashaId,

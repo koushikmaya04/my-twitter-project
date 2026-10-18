@@ -6,6 +6,18 @@ export interface CreatePostCommand {
   repostOfId?: string;
 }
 
+export interface FollowUserRecord {
+  id: string;
+  handle: string;
+  displayName: string;
+  bio: string | null;
+  avatar: {
+    smallUrl: string;
+    largeUrl: string;
+  };
+  followedAt: string;
+}
+
 export interface UpdateProfileCommand {
   userId: string;
   displayName?: string;
@@ -21,18 +33,35 @@ export interface SocialFeedRepository {
     viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>>;
 
-  getPostById(
-    id: string,
-    viewerId: string | null,
-  ): Promise<PostRecord | null>;
+  getPostById(id: string, viewerId: string | null): Promise<PostRecord | null>;
 
-  getUserById(
-    id: string,
-  ): Promise<UserRecord | null>;
+  getUserById(id: string): Promise<UserRecord | null>;
 
-  updateProfile(
-  command: UpdateProfileCommand,
-): Promise<UserRecord | null>;
+  setFollow(
+    followerId: string,
+    followingId: string,
+    desiredState: boolean,
+  ): Promise<{
+    following: boolean;
+    followerCount: number;
+    followingCount: number;
+  }>;
+
+  isFollowing(followerId: string, followingId: string): Promise<boolean>;
+
+  listFollowers(
+    userId: string,
+    cursor: string | null,
+    limit: number,
+  ): Promise<PaginatedResult<FollowUserRecord>>;
+
+  listFollowing(
+    userId: string,
+    cursor: string | null,
+    limit: number,
+  ): Promise<PaginatedResult<FollowUserRecord>>;
+
+  updateProfile(command: UpdateProfileCommand): Promise<UserRecord | null>;
 
   listReplies(
     postId: string,
@@ -54,11 +83,7 @@ export interface SocialFeedRepository {
     viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>>;
 
-  createPost(
-    command: CreatePostCommand,
-  ): Promise<PostRecord>;
-
-  
+  createPost(command: CreatePostCommand): Promise<PostRecord>;
 
   setLike(
     postId: string,

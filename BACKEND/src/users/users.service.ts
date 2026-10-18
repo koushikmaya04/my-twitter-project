@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type {
   SocialFeedRepository,
+   FollowUserRecord,
+  PaginatedResult
 } from '../data/repository/social-feed.repository';
 import { SOCIAL_FEED_REPOSITORY } from '../data/repository/social-feed.repository.token';
 import {
@@ -63,4 +65,38 @@ async updateProfile(
 
     return mapPaginatedMedia(result);
   }
+  async setFollow(
+  followerId: string,
+  followingId: string,
+  desiredState: boolean,
+) {
+  return this.repository.setFollow(
+    followerId,
+    followingId,
+    desiredState,
+  );
+}
+
+async isFollowing(
+  followerId: string,
+  followingId: string,
+): Promise<boolean> {
+  return this.repository.isFollowing(followerId, followingId);
+}
+
+async listFollowers(
+  userId: string,
+  cursor: string | null,
+  limit: number,
+): Promise<PaginatedResult<FollowUserRecord>> {
+  return this.repository.listFollowers(userId, cursor, limit);
+}
+
+async listFollowing(
+  userId: string,
+  cursor: string | null,
+  limit: number,
+): Promise<PaginatedResult<FollowUserRecord>> {
+  return this.repository.listFollowing(userId, cursor, limit);
+}
 }

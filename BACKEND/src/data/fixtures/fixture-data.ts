@@ -38,6 +38,7 @@ export type LikeFixture = {
 export type FollowFixture = {
   followerId: string;
   followingId: string;
+  createdAt: string;
 };
 
 /* =========================================================
@@ -557,11 +558,7 @@ export const reposts: PostFixture[] = [
    ALL POSTS
    ========================================================= */
 
-export const posts: PostFixture[] = [
-  ...originalPosts,
-  ...replies,
-  ...reposts,
-];
+export const posts: PostFixture[] = [...originalPosts, ...replies, ...reposts];
 
 /* =========================================================
    MEDIA
@@ -713,33 +710,41 @@ export const follows: FollowFixture[] = [
   {
     followerId: users[0].id,
     followingId: users[1].id,
+    createdAt: '2026-01-01T10:00:00.000Z',
   },
   {
     followerId: users[0].id,
     followingId: users[2].id,
+    createdAt: '2026-01-01T10:01:00.000Z',
   },
   {
     followerId: users[1].id,
     followingId: users[0].id,
+    createdAt: '2026-01-01T10:02:00.000Z',
   },
   {
     followerId: users[1].id,
     followingId: users[3].id,
+    createdAt: '2026-01-01T10:03:00.000Z',
   },
   {
     followerId: users[2].id,
     followingId: users[4].id,
+    createdAt: '2026-01-01T10:04:00.000Z',
   },
   {
     followerId: users[3].id,
     followingId: users[0].id,
+    createdAt: '2026-01-01T10:05:00.000Z',
   },
   {
     followerId: users[4].id,
     followingId: users[1].id,
+    createdAt: '2026-01-01T10:06:00.000Z',
   },
   {
     followerId: users[5].id,
     followingId: users[0].id,
+    createdAt: '2026-01-01T10:07:00.000Z',
   },
 ];

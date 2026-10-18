@@ -13,6 +13,7 @@ import { follows, likes, postMedia, posts, users } from '../../database/schema';
 
 import type {
   SocialFeedRepository,
+  FollowUserRecord,
   PaginatedResult,
   PostRecord,
   UserRecord,
@@ -20,6 +21,7 @@ import type {
   CreatePostCommand,
   UpdateProfileCommand,
 } from './social-feed.repository';
+import { validateCursor } from '../../common/cursor-validation/cursor.validation';
 
 import { SOCIAL_FEED_READ_FAILURE } from './social-feed-read-failure.token';
 import type { SocialFeedReadFailure } from './social-feed-read-failure.token';
@@ -715,6 +717,216 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
     return {
       likedByViewer: desiredState,
       likeCount: Number(result.count),
+    };
+  }
+
+  async setFollow(
+    followerId: string,
+    followingId: string,
+    desiredState: boolean,
+  ): Promise<{
+    following: boolean;
+    followerCount: number;
+    followingCount: number;
+  }> {
+    await this.waitIfConfigured();
+
+    if (followerId === followingId) {
+      throw new InvalidTargetError('A user cannot follow themselves');
+    }
+
+    const [follower] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, followerId), isNull(users.deactivatedAt)))
+      .limit(1);
+
+    if (!follower) {
+      throw new NotFoundDomainError('Follower account not found');
+    }
+
+    const [target] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, followingId), isNull(users.deactivatedAt)))
+      .limit(1);
+
+    if (!target) {
+      throw new NotFoundDomainError('Target account not found');
+    }
+
+    if (desiredState) {
+      await this.db
+        .insert(follows)
+        .values({ followerId, followingId })
+        .onConflictDoNothing({
+          target: [follows.followerId, follows.followingId],
+        });
+    } else {
+      await this.db
+        .delete(follows)
+        .where(
+          and(
+            eq(follows.followerId, followerId),
+            eq(follows.followingId, followingId),
+          ),
+        );
+    }
+
+    const [state] = await this.db
+      .select({ id: follows.followerId })
+      .from(follows)
+      .where(
+        and(
+          eq(follows.followerId, followerId),
+          eq(follows.followingId, followingId),
+        ),
+      )
+      .limit(1);
+
+    const [followerCountRow] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(follows)
+      .innerJoin(users, eq(follows.followerId, users.id))
+      .where(
+        and(eq(follows.followingId, followingId), isNull(users.deactivatedAt)),
+      );
+
+    const [followingCountRow] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(follows)
+      .innerJoin(users, eq(follows.followingId, users.id))
+      .where(
+        and(eq(follows.followerId, followerId), isNull(users.deactivatedAt)),
+      );
+
+    return {
+      following: Boolean(state),
+      followerCount: followerCountRow?.count ?? 0,
+      followingCount: followingCountRow?.count ?? 0,
+    };
+  }
+
+  async isFollowing(followerId: string, followingId: string): Promise<boolean> {
+    this.checkReadFailure();
+    await this.waitIfConfigured();
+
+    const [row] = await this.db
+      .select({ id: follows.followerId })
+      .from(follows)
+      .innerJoin(users, eq(follows.followingId, users.id))
+      .where(
+        and(
+          eq(follows.followerId, followerId),
+          eq(follows.followingId, followingId),
+          isNull(users.deactivatedAt),
+        ),
+      )
+      .limit(1);
+
+    return Boolean(row);
+  }
+
+  async listFollowers(
+    userId: string,
+    cursor: string | null,
+    limit: number,
+  ): Promise<PaginatedResult<FollowUserRecord>> {
+    return this.listFollowUsers(userId, cursor, limit, 'followers');
+  }
+
+  async listFollowing(
+    userId: string,
+    cursor: string | null,
+    limit: number,
+  ): Promise<PaginatedResult<FollowUserRecord>> {
+    return this.listFollowUsers(userId, cursor, limit, 'following');
+  }
+
+  private async listFollowUsers(
+    userId: string,
+    cursor: string | null,
+    limit: number,
+    direction: 'followers' | 'following',
+  ): Promise<PaginatedResult<FollowUserRecord>> {
+    this.checkReadFailure();
+    await this.waitIfConfigured();
+
+    const [target] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deactivatedAt)))
+      .limit(1);
+
+    if (!target) {
+      throw new NotFoundDomainError('Account not found');
+    }
+
+    const cursorValue = cursor ? validateCursor(cursor) : null;
+    const personId =
+      direction === 'followers' ? follows.followerId : follows.followingId;
+
+    const conditions = [
+      direction === 'followers'
+        ? eq(follows.followingId, userId)
+        : eq(follows.followerId, userId),
+      isNull(users.deactivatedAt),
+    ];
+
+    if (cursorValue) {
+      const cursorDate = new Date(cursorValue.createdAt);
+
+      conditions.push(
+        or(
+          lt(follows.createdAt, cursorDate),
+          and(eq(follows.createdAt, cursorDate), lt(personId, cursorValue.id)),
+        )!,
+      );
+    }
+
+    const rows = await this.db
+      .select({
+        id: users.id,
+        handle: users.handle,
+        displayName: users.displayName,
+        bio: users.bio,
+        smallUrl: users.avatarSmallUrl,
+        largeUrl: users.avatarLargeUrl,
+        followedAt: follows.createdAt,
+      })
+      .from(follows)
+      .innerJoin(
+        users,
+        eq(
+          users.id,
+          direction === 'followers' ? follows.followerId : follows.followingId,
+        ),
+      )
+      .where(and(...conditions))
+      .orderBy(desc(follows.createdAt), desc(personId))
+      .limit(limit + 1);
+
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
+    const lastRow = pageRows[pageRows.length - 1];
+
+    return {
+      items: pageRows.map((row: any) => ({
+        id: row.id,
+        handle: row.handle,
+        displayName: row.displayName,
+        bio: row.bio,
+        avatar: {
+          smallUrl: row.smallUrl,
+          largeUrl: row.largeUrl,
+        },
+        followedAt: row.followedAt.toISOString(),
+      })),
+      hasMore,
+      nextCursor:
+        hasMore && lastRow
+          ? this.encodeCursor(lastRow.followedAt, lastRow.id)
+          : null,
     };
   }
 

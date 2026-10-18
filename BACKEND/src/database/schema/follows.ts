@@ -37,8 +37,17 @@ export const follows = pgTable(
       name: 'follows_pk',
       columns: [table.followerId, table.followingId],
     }),
+    index('follows_following_created_idx').on(
+      table.followingId,
+      table.createdAt,
+      table.followerId,
+    ),
 
-    index('follows_following_idx').on(table.followingId),
+    index('follows_follower_created_idx').on(
+      table.followerId,
+      table.createdAt,
+      table.followingId,
+    ),
 
     check(
       'follows_no_self_follow',

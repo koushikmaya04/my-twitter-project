@@ -11,10 +11,15 @@ import * as argon2 from 'argon2';
 
 import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 
-
 import { AuthService } from './auth.service';
 import { DATABASE } from '../database/database.provider';
 import { sessions, users } from '../database/schema';
+
+function mockResolvedValue(value: unknown) {
+  return jest
+    .fn<(...args: any[]) => Promise<unknown>>()
+    .mockResolvedValue(value);
+}
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -56,12 +61,12 @@ describe('AuthService', () => {
       const userUpdate = {
         set: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        returning: jest.fn().mockResolvedValue([{ id: userId }]),
+        returning: mockResolvedValue([{ id: userId }]),
       };
 
       const sessionUpdate = {
         set: jest.fn().mockReturnThis(),
-        where: jest.fn().mockResolvedValue(undefined),
+        where: mockResolvedValue(undefined),
       };
 
       const tx = {
@@ -72,8 +77,7 @@ describe('AuthService', () => {
       };
 
       db.transaction.mockImplementation(
-        async (callback: (transaction: any) => Promise<void>) =>
-          callback(tx),
+        async (callback: (transaction: any) => Promise<void>) => callback(tx),
       );
 
       await service.deactivate(userId);
@@ -102,7 +106,7 @@ describe('AuthService', () => {
       const userUpdate = {
         set: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        returning: jest.fn().mockResolvedValue([]),
+        returning: mockResolvedValue([]),
       };
 
       const tx = {
@@ -110,8 +114,7 @@ describe('AuthService', () => {
       };
 
       db.transaction.mockImplementation(
-        async (callback: (transaction: any) => Promise<void>) =>
-          callback(tx),
+        async (callback: (transaction: any) => Promise<void>) => callback(tx),
       );
 
       await expect(service.deactivate(userId)).rejects.toThrow(
@@ -124,36 +127,36 @@ describe('AuthService', () => {
   });
 
   describe('login', () => {
-  it('should reject login for a deactivated account', async () => {
-    const passwordHash = await argon2.hash('valid-password');
+    it('should reject login for a deactivated account', async () => {
+      const passwordHash = await argon2.hash('valid-password');
 
-    const deactivatedUser = {
-      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      handle: 'maya',
-      displayName: 'Maya',
-      createdAt: new Date(),
-      passwordHash,
-      deactivatedAt: new Date(),
-    };
-
-    const query = {
-      from: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockResolvedValue([deactivatedUser]),
-    };
-
-    db.select.mockReturnValue(query);
-
-    await expect(
-      service.login({
+      const deactivatedUser = {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         handle: 'maya',
-        password: 'valid-password',
-      }),
-    ).rejects.toThrow(UnauthorizedException);
+        displayName: 'Maya',
+        createdAt: new Date(),
+        passwordHash,
+        deactivatedAt: new Date(),
+      };
 
-    expect(db.insert).not.toHaveBeenCalled();
+      const query = {
+        from: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        limit: mockResolvedValue([deactivatedUser]),
+      };
+
+      db.select.mockReturnValue(query);
+
+      await expect(
+        service.login({
+          handle: 'maya',
+          password: 'valid-password',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(db.insert).not.toHaveBeenCalled();
+    });
   });
-});
 
   describe('me', () => {
     it('should reject a session that no longer resolves to an active user', async () => {
@@ -161,20 +164,18 @@ describe('AuthService', () => {
         from: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockResolvedValue([]),
+        limit: mockResolvedValue([]),
       };
 
       db.select.mockReturnValue(query);
 
-      await expect(
-        service.me('session=old-session-token'),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.me('session=old-session-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('should reject a request without a session cookie', async () => {
-      await expect(service.me()).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.me()).rejects.toThrow(UnauthorizedException);
 
       expect(db.select).not.toHaveBeenCalled();
     });

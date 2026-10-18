@@ -962,14 +962,16 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
         count: sql<number>`count(*)::int`,
       })
       .from(follows)
-      .where(eq(follows.followingId, id));
+      .innerJoin(users, eq(follows.followerId, users.id))
+      .where(and(eq(follows.followingId, id), isNull(users.deactivatedAt)));
 
     const [followingCountResult] = await this.db
       .select({
         count: sql<number>`count(*)::int`,
       })
       .from(follows)
-      .where(eq(follows.followerId, id));
+      .innerJoin(users, eq(follows.followingId, users.id))
+      .where(and(eq(follows.followerId, id), isNull(users.deactivatedAt)));
 
     return {
       id: user.id,

@@ -421,6 +421,60 @@ describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
         repository.listFollowing(inactiveId, null, 10),
       ).rejects.toBeInstanceOf(NotFoundDomainError);
     });
+
+    it('excludes deactivated accounts from profile follower and following counts', async () => {
+      const activeFollowerId = randomUUID();
+      const activeTargetId = randomUUID();
+      const inactiveId = randomUUID();
+
+      createdUserIds.push(activeFollowerId, activeTargetId, inactiveId);
+
+      await db.insert(users).values([
+        {
+          id: activeFollowerId,
+          handle: `active_follower_${activeFollowerId.replace(/-/g, '').slice(0, 16)}`,
+          displayName: 'Active Follower',
+        },
+        {
+          id: activeTargetId,
+          handle: `active_target_${activeTargetId.replace(/-/g, '').slice(0, 16)}`,
+          displayName: 'Active Target',
+        },
+        {
+          id: inactiveId,
+          handle: `inactive_${inactiveId.replace(/-/g, '').slice(0, 20)}`,
+          displayName: 'Inactive Account',
+          deactivatedAt: new Date(),
+        },
+      ]);
+
+      // One valid relationship.
+      await db.insert(follows).values({
+        followerId: activeFollowerId,
+        followingId: activeTargetId,
+      });
+
+      // Existing relationships involving the deactivated account.
+      await db.insert(follows).values([
+        {
+          followerId: inactiveId,
+          followingId: activeTargetId,
+        },
+        {
+          followerId: activeFollowerId,
+          followingId: inactiveId,
+        },
+      ]);
+
+      const target = await repository.getUserById(activeTargetId);
+      const follower = await repository.getUserById(activeFollowerId);
+
+      expect(target).not.toBeNull();
+      expect(target?.followerCount).toBe(1);
+
+      expect(follower).not.toBeNull();
+      expect(follower?.followingCount).toBe(1);
+    });
   });
 
   describe('Write Use Cases, Constraints & Error Mapping', () => {

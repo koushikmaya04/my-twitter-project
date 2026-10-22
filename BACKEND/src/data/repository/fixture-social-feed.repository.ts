@@ -119,6 +119,77 @@ export class FixtureSocialFeedRepository implements SocialFeedRepository {
     };
   }
 
+  async listHomeFeed(
+    cursor: string | null,
+    limit: number,
+    viewerId: string,
+  ): Promise<PaginatedResult<PostRecord>> {
+    await this.waitIfConfigured();
+    this.checkReadFailure();
+
+    // Include the viewer and accounts they currently follow.
+    const eligibleAuthorIds = new Set([
+      viewerId,
+      ...follows
+        .filter((follow) => follow.followerId === viewerId)
+        .map((follow) => follow.followingId),
+    ]);
+
+    const activeUserIds = new Set(
+      users.filter((user) => user.deactivatedAt == null).map((user) => user.id),
+    );
+
+    let filteredPosts = originalPosts.filter(
+      (post) =>
+        eligibleAuthorIds.has(post.authorId) &&
+        activeUserIds.has(post.authorId),
+    );
+    // Keep the same stable ordering as the public feed.
+    filteredPosts.sort((a, b) => {
+      const dateDifference =
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+
+      if (dateDifference !== 0) {
+        return dateDifference;
+      }
+
+      return b.id.localeCompare(a.id);
+    });
+
+    // Apply the existing timestamp + ID cursor.
+    if (cursor) {
+      const decodedCursor = validateCursor(cursor);
+
+      filteredPosts = filteredPosts.filter((post) => {
+        const postTime = new Date(post.createdAt).getTime();
+        const cursorTime = new Date(decodedCursor.createdAt).getTime();
+
+        return (
+          postTime < cursorTime ||
+          (postTime === cursorTime && post.id < decodedCursor.id)
+        );
+      });
+    }
+
+    const page = filteredPosts.slice(0, limit + 1);
+    const hasMore = page.length > limit;
+
+    const items = page
+      .slice(0, limit)
+      .map((post) => this.toPostRecord(post, viewerId));
+
+    const lastItem = items[items.length - 1];
+
+    return {
+      items,
+      hasMore,
+      nextCursor:
+        hasMore && lastItem
+          ? this.encodeCursor(lastItem.createdAt, lastItem.id)
+          : null,
+    };
+  }
+
   async getPostById(
     id: string,
     viewerId: string | null,

@@ -3,6 +3,7 @@ export type UserFixture = {
   handle: string;
   displayName: string;
   bio: string | null;
+  deactivatedAt?: string | null;
   avatar: {
     smallUrl: string;
     largeUrl: string;

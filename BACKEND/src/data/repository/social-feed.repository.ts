@@ -33,6 +33,12 @@ export interface SocialFeedRepository {
     viewerId: string | null,
   ): Promise<PaginatedResult<PostRecord>>;
 
+  listHomeFeed(
+    cursor: string | null,
+    limit: number,
+    viewerId: string,
+  ): Promise<PaginatedResult<PostRecord>>;
+
   getPostById(id: string, viewerId: string | null): Promise<PostRecord | null>;
 
   getUserById(id: string): Promise<UserRecord | null>;

@@ -281,7 +281,75 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
           : null,
     };
   }
+  async listHomeFeed(
+    cursor: string | null,
+    limit: number,
+    viewerId: string,
+  ): Promise<PaginatedResult<PostRecord>> {
+    await this.waitIfConfigured();
+    this.checkReadFailure();
 
+    const cursorValue = cursor ? this.decodeCursor(cursor) : null;
+
+    const conditions = [
+      eq(posts.kind, 'original'),
+      isNull(users.deactivatedAt),
+      or(
+        eq(posts.authorId, viewerId),
+        inArray(
+          posts.authorId,
+          this.db
+            .select({ followingId: follows.followingId })
+            .from(follows)
+            .where(eq(follows.followerId, viewerId)),
+        ),
+      )!,
+    ];
+
+    if (cursorValue) {
+      conditions.push(
+        or(
+          lt(posts.createdAt, cursorValue.createdAt),
+          and(
+            eq(posts.createdAt, cursorValue.createdAt),
+            lt(posts.id, cursorValue.id),
+          ),
+        )!,
+      );
+    }
+
+    const rows = await this.db
+      .select({
+        id: posts.id,
+        kind: posts.kind,
+        text: posts.text,
+        createdAt: posts.createdAt,
+        replyToId: posts.replyToId,
+        repostOfId: posts.repostOfId,
+        authorId: users.id,
+        handle: users.handle,
+        displayName: users.displayName,
+      })
+      .from(posts)
+      .innerJoin(users, eq(posts.authorId, users.id))
+      .where(and(...conditions))
+      .orderBy(desc(posts.createdAt), desc(posts.id))
+      .limit(limit + 1);
+
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
+    const items = await this.hydratePosts(pageRows, viewerId);
+    const lastRow = pageRows[pageRows.length - 1];
+
+    return {
+      items,
+      hasMore,
+      nextCursor:
+        hasMore && lastRow
+          ? this.encodeCursor(lastRow.createdAt, lastRow.id)
+          : null,
+    };
+  }
   async getPostById(
     id: string,
     viewerId: string | null,

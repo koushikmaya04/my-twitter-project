@@ -5,7 +5,7 @@ import {
   SOCIAL_FEED_READ_FAILURE,
   type SocialFeedReadFailure,
 } from './social-feed-read-failure.token';
-import { follows, users } from '../fixtures/fixture-data';
+import { follows, users, originalPosts } from '../fixtures/fixture-data';
 
 describe('FixtureSocialFeedRepository — follows', () => {
   let repository: FixtureSocialFeedRepository;
@@ -99,5 +99,47 @@ describe('FixtureSocialFeedRepository — follows', () => {
     await expect(repository.setFollow(ashaId, ashaId, true)).rejects.toThrow(
       'A user cannot follow themselves',
     );
+  });
+
+  it('excludes posts from deactivated authors in the home feed', async () => {
+    const viewerId = ashaId;
+    const followedAuthorId = rahulId;
+
+    // Find a post from a followed author so we can verify it remains visible.
+    const followedPost = originalPosts.find(
+      (post) => post.authorId === followedAuthorId,
+    );
+
+    // Find a different author with at least one original post.
+    const deactivatedAuthor = users.find(
+      (user) =>
+        user.id !== viewerId &&
+        user.id !== followedAuthorId &&
+        originalPosts.some((post) => post.authorId === user.id),
+    );
+
+    expect(followedPost).toBeDefined();
+    expect(deactivatedAuthor).toBeDefined();
+
+    if (!followedPost || !deactivatedAuthor) {
+      throw new Error('Required home-feed test fixtures are missing');
+    }
+
+    const previousDeactivatedAt = deactivatedAuthor.deactivatedAt;
+
+    try {
+      deactivatedAuthor.deactivatedAt = new Date().toISOString();
+
+      const result = await repository.listHomeFeed(null, 50, viewerId);
+      const returnedAuthorIds = result.items.map((post) => post.author.id);
+      // Posts by the deactivated author must be excluded.
+      expect(returnedAuthorIds).not.toContain(deactivatedAuthor.id);
+
+      // Posts from a followed, active author must remain eligible.
+      expect(returnedAuthorIds).toContain(followedAuthorId);
+    } finally {
+      // Restore shared fixture data even if an assertion fails.
+      deactivatedAuthor.deactivatedAt = previousDeactivatedAt;
+    }
   });
 });

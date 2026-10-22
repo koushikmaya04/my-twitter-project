@@ -1,4 +1,3 @@
-
 import { Inject, Injectable } from '@nestjs/common';
 
 import { SOCIAL_FEED_REPOSITORY } from '../data/repository/social-feed.repository.token';
@@ -17,11 +16,16 @@ export class FeedService {
     cursor: string | null,
     limit: number,
   ): Promise<FeedResponseDto> {
-    const result = await this.repository.listOriginalFeed(
-      cursor,
-      limit,
-      null,
-    );
+    const result = await this.repository.listOriginalFeed(cursor, limit, null);
+
+    return mapPaginatedPosts(result);
+  }
+  async getHomeFeed(
+    cursor: string | null,
+    limit: number,
+    viewerId: string,
+  ): Promise<FeedResponseDto> {
+    const result = await this.repository.listHomeFeed(cursor, limit, viewerId);
 
     return mapPaginatedPosts(result);
   }

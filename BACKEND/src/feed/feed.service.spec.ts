@@ -6,6 +6,13 @@ import type {
   SocialFeedRepository,
 } from '../data/repository/social-feed.repository';
 
+import type { UpdatePostCommand } from '../data/repository/social-feed.repository';
+import {
+  ConflictDomainError,
+  NotFoundDomainError,
+} from '../common/errors/domain-errors';
+import { ForbiddenException } from '@nestjs/common';
+
 describe('FeedService', () => {
   it('uses the repository to get the feed and maps to DTO', async () => {
     const fakeRecord: PostRecord = {
@@ -13,6 +20,9 @@ describe('FeedService', () => {
       kind: 'original',
       text: 'Sample post',
       createdAt: '2026-09-10T10:00:00.000Z',
+      version: 1,
+      isEdited: false,
+      editedAt: null,
       author: {
         id: 'user-1',
         handle: 'alice',
@@ -86,6 +96,9 @@ describe('FeedService', () => {
       kind: 'original',
       text: 'Home feed post',
       createdAt: '2026-09-10T10:00:00.000Z',
+      version: 1,
+      isEdited: false,
+      editedAt: null,
       author: {
         id: 'user-1',
         handle: 'alice',
@@ -141,5 +154,137 @@ describe('FeedService', () => {
       nextCursor: 'home-next-cursor',
       hasMore: true,
     });
+  });
+
+  it('updates a post successfully', async () => {
+    const post = {
+      id: 'post-1',
+      text: 'Updated text',
+      version: 2,
+      isEdited: true,
+      editedAt: '2026-10-24T10:00:00.000Z',
+    } as PostRecord;
+
+    const updatePost = jest
+      .fn<SocialFeedRepository['updatePost']>()
+      .mockResolvedValue({ status: 'updated', post });
+
+    const service = new FeedService({
+      updatePost,
+    } as unknown as SocialFeedRepository);
+
+    const command: UpdatePostCommand = {
+      postId: 'post-1',
+      authorId: 'user-1',
+      text: 'Updated text',
+      expectedVersion: 1,
+    };
+
+    await expect(service.updatePost(command)).resolves.toEqual(post);
+    expect(updatePost).toHaveBeenCalledWith(command);
+  });
+
+  it('rejects stale post versions with a conflict', async () => {
+    const updatePost = jest
+      .fn<SocialFeedRepository['updatePost']>()
+      .mockResolvedValue({ status: 'conflict' });
+
+    const service = new FeedService({
+      updatePost,
+    } as unknown as SocialFeedRepository);
+
+    await expect(
+      service.updatePost({
+        postId: 'post-1',
+        authorId: 'user-1',
+        text: 'Updated text',
+        expectedVersion: 1,
+      }),
+    ).rejects.toThrow(ConflictDomainError);
+  });
+
+  it('rejects edits by users who do not own the post', async () => {
+    const updatePost = jest
+      .fn<SocialFeedRepository['updatePost']>()
+      .mockResolvedValue({ status: 'forbidden' });
+
+    const service = new FeedService({
+      updatePost,
+    } as unknown as SocialFeedRepository);
+
+    await expect(
+      service.updatePost({
+        postId: 'post-1',
+        authorId: 'user-2',
+        text: 'Updated text',
+        expectedVersion: 1,
+      }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('rejects edits outside the edit window', async () => {
+    const updatePost = jest
+      .fn<SocialFeedRepository['updatePost']>()
+      .mockResolvedValue({ status: 'edit_window_expired' });
+
+    const service = new FeedService({
+      updatePost,
+    } as unknown as SocialFeedRepository);
+
+    await expect(
+      service.updatePost({
+        postId: 'post-1',
+        authorId: 'user-1',
+        text: 'Updated text',
+        expectedVersion: 1,
+      }),
+    ).rejects.toThrow(ConflictDomainError);
+  });
+
+  it('deletes a post successfully', async () => {
+    const deletePost = jest
+      .fn<SocialFeedRepository['deletePost']>()
+      .mockResolvedValue({ status: 'deleted' });
+
+    const service = new FeedService({
+      deletePost,
+    } as unknown as SocialFeedRepository);
+
+    await expect(
+      service.deletePost('post-1', 'user-1'),
+    ).resolves.toBeUndefined();
+
+    expect(deletePost).toHaveBeenCalledWith({
+      postId: 'post-1',
+      authorId: 'user-1',
+    });
+  });
+
+  it('rejects deletion by users who do not own the post', async () => {
+    const deletePost = jest
+      .fn<SocialFeedRepository['deletePost']>()
+      .mockResolvedValue({ status: 'forbidden' });
+
+    const service = new FeedService({
+      deletePost,
+    } as unknown as SocialFeedRepository);
+
+    await expect(service.deletePost('post-1', 'user-2')).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('returns not found when deleting a nonexistent post', async () => {
+    const deletePost = jest
+      .fn<SocialFeedRepository['deletePost']>()
+      .mockResolvedValue({ status: 'not_found' });
+
+    const service = new FeedService({
+      deletePost,
+    } as unknown as SocialFeedRepository);
+
+    await expect(service.deletePost('missing-post', 'user-1')).rejects.toThrow(
+      NotFoundDomainError,
+    );
   });
 });

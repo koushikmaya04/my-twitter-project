@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { ConfigService } from '@nestjs/config';
-import { FixtureSocialFeedRepository } from './fixture-social-feed.repository';
+import {
+  FixtureSocialFeedRepository,
+  resetFixtureDeletedPosts,
+} from './fixture-social-feed.repository';
 import {
   SOCIAL_FEED_READ_FAILURE,
   type SocialFeedReadFailure,
 } from './social-feed-read-failure.token';
-import { follows, users, originalPosts } from '../fixtures/fixture-data';
+import { follows, users, originalPosts, posts } from '../fixtures/fixture-data';
 
 describe('FixtureSocialFeedRepository — follows', () => {
   let repository: FixtureSocialFeedRepository;
@@ -21,6 +24,7 @@ describe('FixtureSocialFeedRepository — follows', () => {
   const meeraId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
   beforeEach(() => {
+    resetFixtureDeletedPosts();
     repository = new FixtureSocialFeedRepository(configService, readFailure);
   });
 
@@ -141,5 +145,251 @@ describe('FixtureSocialFeedRepository — follows', () => {
       // Restore shared fixture data even if an assertion fails.
       deactivatedAuthor.deactivatedAt = previousDeactivatedAt;
     }
+  });
+
+  it('excludes deleted posts from the home feed', async () => {
+    const post = originalPosts.find((item) => item.authorId === ashaId);
+
+    expect(post).toBeDefined();
+
+    if (!post) {
+      throw new Error('Required post fixture is missing');
+    }
+
+    // Make sure the viewer can see this author's posts.
+    const previousCreatedAt = post.createdAt;
+
+    try {
+      await repository.deletePost({
+        postId: post.id,
+        authorId: ashaId,
+      });
+
+      const result = await repository.listHomeFeed(null, 50, ashaId);
+
+      expect(result.items.some((item) => item.id === post.id)).toBe(false);
+    } finally {
+      post.createdAt = previousCreatedAt;
+    }
+  });
+
+  it('edits an owned post and increments its version', async () => {
+    const post = originalPosts.find((item) => item.authorId === ashaId);
+
+    expect(post).toBeDefined();
+
+    if (!post) {
+      throw new Error('Required post fixture is missing');
+    }
+
+    const previousText = post.text;
+    const previousCreatedAt = post.createdAt;
+
+    try {
+      // Make sure the post is within the 30-minute edit window.
+      post.createdAt = new Date().toISOString();
+
+      const result = await repository.updatePost({
+        postId: post.id,
+        authorId: ashaId,
+        text: 'Updated post text',
+        expectedVersion: 1,
+      });
+
+      expect(result.status).toBe('updated');
+
+      if (result.status === 'updated') {
+        expect(result.post.text).toBe('Updated post text');
+        expect(result.post.version).toBe(2);
+        expect(result.post.isEdited).toBe(true);
+        expect(result.post.editedAt).not.toBeNull();
+      }
+    } finally {
+      // Restore shared fixture data after the test.
+      post.text = previousText;
+      post.createdAt = previousCreatedAt;
+    }
+  });
+  it("does not allow a user to edit another user's post", async () => {
+    const post = originalPosts.find((item) => item.authorId === rahulId);
+
+    expect(post).toBeDefined();
+
+    if (!post) {
+      throw new Error('Required post fixture is missing');
+    }
+
+    const previousText = post.text;
+
+    try {
+      const result = await repository.updatePost({
+        postId: post.id,
+        authorId: ashaId,
+        text: 'Unauthorized edit',
+        expectedVersion: 1,
+      });
+
+      expect(result.status).toBe('forbidden');
+      expect(post.text).toBe(previousText);
+    } finally {
+      post.text = previousText;
+    }
+  });
+  it('rejects an edit using a stale version', async () => {
+    const post = originalPosts.find((item) => item.authorId === meeraId);
+
+    expect(post).toBeDefined();
+
+    if (!post) {
+      throw new Error('Required post fixture is missing');
+    }
+
+    const previousText = post.text;
+    const previousCreatedAt = post.createdAt;
+
+    try {
+      post.createdAt = new Date().toISOString();
+
+      const firstEdit = await repository.updatePost({
+        postId: post.id,
+        authorId: meeraId,
+        text: 'First edit',
+        expectedVersion: 1,
+      });
+
+      expect(firstEdit.status).toBe('updated');
+
+      const staleEdit = await repository.updatePost({
+        postId: post.id,
+        authorId: meeraId,
+        text: 'Stale edit',
+        expectedVersion: 1,
+      });
+
+      expect(staleEdit.status).toBe('conflict');
+      expect(post.text).toBe('First edit');
+    } finally {
+      post.text = previousText;
+      post.createdAt = previousCreatedAt;
+    }
+  });
+  it('rejects editing a post after the 30-minute window', async () => {
+    const post = originalPosts.find((item) => item.authorId === ashaId);
+
+    expect(post).toBeDefined();
+
+    if (!post) {
+      throw new Error('Required post fixture is missing');
+    }
+
+    const previousText = post.text;
+    const previousCreatedAt = post.createdAt;
+
+    try {
+      // Set the post creation time to 31 minutes ago.
+      post.createdAt = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+
+      const result = await repository.updatePost({
+        postId: post.id,
+        authorId: ashaId,
+        text: 'This edit should be rejected',
+        expectedVersion: 1,
+      });
+
+      expect(result.status).toBe('edit_window_expired');
+      expect(post.text).toBe(previousText);
+    } finally {
+      // Restore the shared fixture.
+      post.text = previousText;
+      post.createdAt = previousCreatedAt;
+    }
+  });
+  it('does not allow editing a repost', async () => {
+    const repost = posts.find((item) => item.kind === 'repost');
+
+    expect(repost).toBeDefined();
+
+    if (!repost) {
+      throw new Error('Required repost fixture is missing');
+    }
+
+    const result = await repository.updatePost({
+      postId: repost.id,
+      authorId: repost.authorId,
+      text: 'Attempted repost edit',
+      expectedVersion: 1,
+    });
+
+    expect(result.status).toBe('not_editable');
+  });
+
+  it('allows the owner to delete their post', async () => {
+    const post = originalPosts.find(
+      (item) =>
+        item.authorId === ashaId &&
+        !posts.some((candidate) => candidate.id === item.id),
+    );
+
+    // Use a known fixture post; cleanup is handled after the test.
+    const target =
+      post ?? originalPosts.find((item) => item.authorId === ashaId);
+
+    expect(target).toBeDefined();
+
+    if (!target) {
+      throw new Error('Required post fixture is missing');
+    }
+
+    try {
+      const result = await repository.deletePost({
+        postId: target.id,
+        authorId: ashaId,
+      });
+
+      expect(result.status).toBe('deleted');
+    } finally {
+      // The fixture repository uses module-level deletion state.
+      // We will verify its reset mechanism before relying on this test.
+    }
+  });
+
+  it('does not allow another user to delete a post', async () => {
+    const post = originalPosts.find((item) => item.authorId === rahulId);
+
+    expect(post).toBeDefined();
+
+    if (!post) {
+      throw new Error('Required post fixture is missing');
+    }
+
+    const result = await repository.deletePost({
+      postId: post.id,
+      authorId: ashaId,
+    });
+
+    expect(result.status).toBe('forbidden');
+  });
+
+  it('allows the owner to delete the same post repeatedly', async () => {
+    const post = originalPosts.find((item) => item.authorId === meeraId);
+
+    expect(post).toBeDefined();
+
+    if (!post) {
+      throw new Error('Required post fixture is missing');
+    }
+
+    const first = await repository.deletePost({
+      postId: post.id,
+      authorId: meeraId,
+    });
+
+    const second = await repository.deletePost({
+      postId: post.id,
+      authorId: meeraId,
+    });
+
+    expect(first.status).toBe('deleted');
+    expect(second.status).toBe('deleted');
   });
 });

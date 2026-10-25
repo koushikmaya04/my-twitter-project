@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray, lt, or, sql, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql, isNull, gte } from 'drizzle-orm';
 
 import { DATABASE } from '../../database/database.provider';
 import { follows, likes, postMedia, posts, users } from '../../database/schema';
@@ -20,6 +20,10 @@ import type {
   MediaRecord,
   CreatePostCommand,
   UpdateProfileCommand,
+  UpdatePostCommand,
+  UpdatePostResult,
+  DeletePostCommand,
+  DeletePostResult,
 } from './social-feed.repository';
 import { validateCursor } from '../../common/cursor-validation/cursor.validation';
 
@@ -102,6 +106,9 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
       authorId: string;
       handle: string;
       displayName: string;
+      version: number;
+      isEdited: boolean;
+      editedAt: Date | null;
     }>,
     viewerId: string | null,
     executor: any = this.db,
@@ -145,9 +152,15 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
         count: sql<number>`count(*)::int`,
       })
       .from(posts)
-      .where(inArray(posts.replyToId, postIds))
+      .innerJoin(users, eq(posts.authorId, users.id))
+      .where(
+        and(
+          inArray(posts.replyToId, postIds),
+          isNull(posts.deletedAt),
+          isNull(users.deactivatedAt),
+        ),
+      )
       .groupBy(posts.replyToId);
-
     // 4. Batch Viewer Likes Query
     const viewerLikeRows = viewerId
       ? await executor
@@ -197,6 +210,9 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
       kind: post.kind as PostRecord['kind'],
       text: post.text,
       createdAt: post.createdAt.toISOString(),
+      version: post.version,
+      isEdited: post.isEdited,
+      editedAt: post.editedAt?.toISOString() ?? null,
       author: {
         id: post.authorId,
         handle: post.handle,
@@ -232,6 +248,7 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
     const conditions = [
       eq(posts.kind, 'original'),
       isNull(users.deactivatedAt),
+      isNull(posts.deletedAt),
     ];
 
     if (cursorValue) {
@@ -294,6 +311,7 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
     const conditions = [
       eq(posts.kind, 'original'),
       isNull(users.deactivatedAt),
+      isNull(posts.deletedAt),
       or(
         eq(posts.authorId, viewerId),
         inArray(
@@ -326,6 +344,12 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
         createdAt: posts.createdAt,
         replyToId: posts.replyToId,
         repostOfId: posts.repostOfId,
+
+        // P0-05: Content lifecycle metadata
+        version: posts.version,
+        isEdited: posts.isEdited,
+        editedAt: posts.editedAt,
+
         authorId: users.id,
         handle: users.handle,
         displayName: users.displayName,
@@ -338,7 +362,9 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
 
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
+
     const items = await this.hydratePosts(pageRows, viewerId);
+
     const lastRow = pageRows[pageRows.length - 1];
 
     return {
@@ -364,13 +390,23 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
         replyToId: posts.replyToId,
         repostOfId: posts.repostOfId,
 
+        version: posts.version,
+        isEdited: posts.isEdited,
+        editedAt: posts.editedAt,
+
         authorId: users.id,
         handle: users.handle,
         displayName: users.displayName,
       })
       .from(posts)
       .innerJoin(users, eq(posts.authorId, users.id))
-      .where(and(eq(posts.id, id), isNull(users.deactivatedAt)))
+      .where(
+        and(
+          eq(posts.id, id),
+          isNull(users.deactivatedAt),
+          isNull(posts.deletedAt),
+        ),
+      )
       .limit(1);
 
     if (result.length === 0) {
@@ -405,7 +441,14 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
         count: sql<number>`count(*)::int`,
       })
       .from(posts)
-      .where(eq(posts.replyToId, id));
+      .innerJoin(users, eq(posts.authorId, users.id))
+      .where(
+        and(
+          eq(posts.replyToId, id),
+          isNull(posts.deletedAt),
+          isNull(users.deactivatedAt),
+        ),
+      );
 
     const viewerLike = viewerId
       ? await executor
@@ -418,6 +461,9 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
       : [];
 
     return {
+      version: post.version,
+      isEdited: post.isEdited,
+      editedAt: post.editedAt?.toISOString() ?? null,
       id: post.id,
       kind: post.kind as PostRecord['kind'],
       text: post.text,
@@ -445,6 +491,26 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
   ): Promise<PaginatedResult<PostRecord>> {
     await this.waitIfConfigured();
     this.checkReadFailure();
+    const parent = await this.db
+      .select({ id: posts.id })
+      .from(posts)
+      .innerJoin(users, eq(posts.authorId, users.id))
+      .where(
+        and(
+          eq(posts.id, postId),
+          isNull(posts.deletedAt),
+          isNull(users.deactivatedAt),
+        ),
+      )
+      .limit(1);
+
+    if (parent.length === 0) {
+      return {
+        items: [],
+        hasMore: false,
+        nextCursor: null,
+      };
+    }
 
     let cursorValue: {
       createdAt: Date;
@@ -459,6 +525,7 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
       eq(posts.kind, 'reply'),
       eq(posts.replyToId, postId),
       isNull(users.deactivatedAt),
+      isNull(posts.deletedAt),
     ];
 
     if (cursorValue) {
@@ -529,6 +596,7 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
       eq(posts.authorId, userId),
       eq(posts.kind, 'original'),
       isNull(users.deactivatedAt),
+      isNull(posts.deletedAt),
     ];
 
     if (cursorValue) {
@@ -611,6 +679,7 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
     const conditions = [
       eq(posts.kind, 'original'),
       isNull(users.deactivatedAt),
+      isNull(posts.deletedAt),
       sql`${posts.text} ILIKE ${`%${safeQuery}%`} ESCAPE '\\'`,
     ];
 
@@ -676,7 +745,14 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
             kind: posts.kind,
           })
           .from(posts)
-          .where(eq(posts.id, replyToId))
+          .innerJoin(users, eq(posts.authorId, users.id))
+          .where(
+            and(
+              eq(posts.id, replyToId),
+              isNull(posts.deletedAt),
+              isNull(users.deactivatedAt),
+            ),
+          )
           .limit(1);
 
         if (parent.length === 0) {
@@ -699,7 +775,14 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
             kind: posts.kind,
           })
           .from(posts)
-          .where(eq(posts.id, repostOfId))
+          .innerJoin(users, eq(posts.authorId, users.id))
+          .where(
+            and(
+              eq(posts.id, repostOfId),
+              isNull(posts.deletedAt),
+              isNull(users.deactivatedAt),
+            ),
+          )
           .limit(1);
 
         if (target.length === 0) {
@@ -739,6 +822,133 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
     });
   }
 
+  async updatePost(command: UpdatePostCommand): Promise<UpdatePostResult> {
+    const { postId, authorId, text, expectedVersion } = command;
+
+    // Read the current state to determine why an edit may be rejected.
+    const rows = await this.db
+      .select({
+        id: posts.id,
+        authorId: posts.authorId,
+        kind: posts.kind,
+        createdAt: posts.createdAt,
+        version: posts.version,
+        deletedAt: posts.deletedAt,
+      })
+      .from(posts)
+      .where(eq(posts.id, postId))
+      .limit(1);
+
+    const current = rows[0];
+
+    if (!current) {
+      return { status: 'not_found' };
+    }
+
+    if (current.authorId !== authorId) {
+      return { status: 'forbidden' };
+    }
+
+    if (current.deletedAt !== null) {
+      return { status: 'not_editable' };
+    }
+
+    // Reposts have no editable text of their own.
+    if (current.kind === 'repost') {
+      return { status: 'not_editable' };
+    }
+
+    const editDeadline = new Date(current.createdAt).getTime() + 30 * 60 * 1000;
+
+    if (Date.now() > editDeadline) {
+      return { status: 'edit_window_expired' };
+    }
+
+    if (current.version !== expectedVersion) {
+      return { status: 'conflict' };
+    }
+
+    // The WHERE conditions make the version check atomic.
+    // Only one concurrent request can update this version.
+    const updated = await this.db
+      .update(posts)
+      .set({
+        text,
+        version: sql`${posts.version} + 1`,
+        isEdited: true,
+        editedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(posts.id, postId),
+          eq(posts.authorId, authorId),
+          eq(posts.version, expectedVersion),
+          isNull(posts.deletedAt),
+          gte(posts.createdAt, sql`now() - interval '30 minutes'`),
+          sql`${posts.kind} <> 'repost'`,
+        ),
+      )
+      .returning({ id: posts.id });
+
+    if (updated.length === 0) {
+      // State changed after our initial read, or the deadline passed.
+      return { status: 'conflict' };
+    }
+
+    const post = await this.getPostById(postId, authorId);
+
+    if (!post) {
+      throw new NotFoundDomainError('Updated post could not be loaded');
+    }
+
+    return { status: 'updated', post };
+  }
+
+  async deletePost(command: DeletePostCommand): Promise<DeletePostResult> {
+    const { postId, authorId } = command;
+
+    // First, check whether the post exists.
+    const rows = await this.db
+      .select({
+        id: posts.id,
+        authorId: posts.authorId,
+        deletedAt: posts.deletedAt,
+      })
+      .from(posts)
+      .where(eq(posts.id, postId))
+      .limit(1);
+
+    const current = rows[0];
+
+    if (!current) {
+      return { status: 'not_found' };
+    }
+
+    // Only the post's owner can delete it.
+    if (current.authorId !== authorId) {
+      return { status: 'forbidden' };
+    }
+
+    // Repeated deletion by the owner is safe.
+    if (current.deletedAt !== null) {
+      return { status: 'deleted' };
+    }
+
+    // Soft-delete: keep the row, but record the deletion time.
+    await this.db
+      .update(posts)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(posts.id, postId),
+          eq(posts.authorId, authorId),
+          isNull(posts.deletedAt),
+        ),
+      );
+
+    return { status: 'deleted' };
+  }
+
   async setLike(
     postId: string,
     viewerId: string,
@@ -748,11 +958,9 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
     likeCount: number;
   }> {
     const post = await this.db
-      .select({
-        id: posts.id,
-      })
+      .select({ id: posts.id })
       .from(posts)
-      .where(eq(posts.id, postId))
+      .where(and(eq(posts.id, postId), isNull(posts.deletedAt)))
       .limit(1);
 
     if (post.length === 0) {
@@ -782,8 +990,14 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
       .from(likes)
       .where(eq(likes.postId, postId));
 
+    const viewerLike = await this.db
+      .select({ userId: likes.userId })
+      .from(likes)
+      .where(and(eq(likes.userId, viewerId), eq(likes.postId, postId)))
+      .limit(1);
+
     return {
-      likedByViewer: desiredState,
+      likedByViewer: viewerLike.length > 0,
       likeCount: Number(result.count),
     };
   }
@@ -1023,7 +1237,13 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
         count: sql<number>`count(*)::int`,
       })
       .from(posts)
-      .where(and(eq(posts.authorId, id), eq(posts.kind, 'original')));
+      .where(
+        and(
+          eq(posts.authorId, id),
+          eq(posts.kind, 'original'),
+          isNull(posts.deletedAt),
+        ),
+      );
 
     const [followerCountResult] = await this.db
       .select({

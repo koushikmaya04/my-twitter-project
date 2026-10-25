@@ -20,6 +20,8 @@ describe('FeedController', () => {
   const feedService = {
     getFeed: jest.fn<FeedService['getFeed']>(),
     getHomeFeed: jest.fn<FeedService['getHomeFeed']>(),
+    updatePost: jest.fn<FeedService['updatePost']>(),
+    deletePost: jest.fn<FeedService['deletePost']>(),
   };
 
   const sessionGuard = {
@@ -30,6 +32,12 @@ describe('FeedController', () => {
 
     feedService.getFeed.mockResolvedValue(feedResponse);
     feedService.getHomeFeed.mockResolvedValue(feedResponse);
+
+    feedService.updatePost.mockResolvedValue(
+      {} as Awaited<ReturnType<FeedService['updatePost']>>,
+    );
+
+    feedService.deletePost.mockResolvedValue(undefined);
     sessionGuard.canActivate.mockResolvedValue(true);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -143,5 +151,62 @@ describe('FeedController', () => {
     expect(
       Reflect.getMetadata('__guards__', FeedController.prototype.getHomeFeed),
     ).toContain(SessionGuard);
+  });
+
+  describe('PATCH /feed/posts/:id', () => {
+    it('passes the post ID, authenticated user ID, text, and expected version to the service', async () => {
+      const request = {
+        user: { id: 'user-123' },
+      } as unknown as AuthenticatedRequest;
+
+      await controller.updatePost(
+        'post-123',
+        { text: '  Updated post  ', expectedVersion: 1 },
+        request,
+      );
+
+      expect(feedService.updatePost).toHaveBeenCalledWith({
+        postId: 'post-123',
+        authorId: 'user-123',
+        text: 'Updated post',
+        expectedVersion: 1,
+      });
+    });
+
+    it('uses the session guard', () => {
+      expect(
+        Reflect.getMetadata('__guards__', FeedController.prototype.updatePost),
+      ).toContain(SessionGuard);
+    });
+  });
+
+  describe('DELETE /feed/posts/:id', () => {
+    it('passes the post ID and authenticated user ID to the service', async () => {
+      const request = {
+        user: { id: 'user-123' },
+      } as unknown as AuthenticatedRequest;
+
+      await controller.deletePost('post-123', request);
+
+      expect(feedService.deletePost).toHaveBeenCalledWith(
+        'post-123',
+        'user-123',
+      );
+    });
+
+    it('uses the session guard', () => {
+      expect(
+        Reflect.getMetadata('__guards__', FeedController.prototype.deletePost),
+      ).toContain(SessionGuard);
+    });
+
+    it('sets the response status to 204 No Content', () => {
+      const statusCode = Reflect.getMetadata(
+        '__httpCode__',
+        FeedController.prototype.deletePost,
+      );
+
+      expect(statusCode).toBe(204);
+    });
   });
 });

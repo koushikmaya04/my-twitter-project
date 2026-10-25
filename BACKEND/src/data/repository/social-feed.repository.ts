@@ -6,6 +6,29 @@ export interface CreatePostCommand {
   repostOfId?: string;
 }
 
+export interface UpdatePostCommand {
+  postId: string;
+  authorId: string;
+  text: string;
+  expectedVersion: number;
+}
+
+export type UpdatePostResult =
+  | { status: 'updated'; post: PostRecord }
+  | { status: 'not_found' }
+  | { status: 'forbidden' }
+  | { status: 'not_editable' }
+  | { status: 'edit_window_expired' }
+  | { status: 'conflict' };
+
+export interface DeletePostCommand {
+  postId: string;
+  authorId: string;
+}
+
+export type DeletePostResult =
+  { status: 'deleted' } | { status: 'not_found' } | { status: 'forbidden' };
+
 export interface FollowUserRecord {
   id: string;
   handle: string;
@@ -90,6 +113,8 @@ export interface SocialFeedRepository {
   ): Promise<PaginatedResult<PostRecord>>;
 
   createPost(command: CreatePostCommand): Promise<PostRecord>;
+  updatePost(command: UpdatePostCommand): Promise<UpdatePostResult>;
+  deletePost(command: DeletePostCommand): Promise<DeletePostResult>;
 
   setLike(
     postId: string,
@@ -131,6 +156,9 @@ export interface PostRecord {
 
   replyToId: string | null;
   repostOfId: string | null;
+  version: number;
+  isEdited: boolean;
+  editedAt: string | null;
 }
 
 export interface MediaRecord {

@@ -1,10 +1,36 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+
+import { IsInt, IsString, MaxLength, Min, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
 import type { Request } from 'express';
 
 import { FeedService } from './feed.service';
 import { validateFeedQuery } from '../common/cursor-validation/feed-query.validation';
 import { SessionGuard } from '../auth/session.guard';
 import type { AuthenticatedRequest } from '../auth/authenticated-request';
+
+class UpdatePostBodyDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(280)
+  text!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  expectedVersion!: number;
+}
 
 @Controller('feed')
 export class FeedController {
@@ -27,5 +53,29 @@ export class FeedController {
     );
 
     return this.feedService.getHomeFeed(cursor, limit, request.user.id);
+  }
+  @Patch('posts/:id')
+  @UseGuards(SessionGuard)
+  async updatePost(
+    @Param('id') postId: string,
+    @Body() body: UpdatePostBodyDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.feedService.updatePost({
+      postId,
+      authorId: request.user.id,
+      text: body.text.trim(),
+      expectedVersion: body.expectedVersion,
+    });
+  }
+
+  @Delete('posts/:id')
+  @UseGuards(SessionGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deletePost(
+    @Param('id') postId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.feedService.deletePost(postId, request.user.id);
   }
 }

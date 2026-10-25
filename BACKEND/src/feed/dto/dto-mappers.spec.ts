@@ -14,11 +14,17 @@ import type {
 } from '../../data/repository/social-feed.repository';
 
 describe('DTO Mappers (D04 — Response DTO Safety)', () => {
-  const samplePostRecord: PostRecord & { internalDbField?: string; hiddenFlag?: boolean } = {
+  const samplePostRecord: PostRecord & {
+    internalDbField?: string;
+    hiddenFlag?: boolean;
+  } = {
     id: '11111111-1111-4111-8111-000000000001',
     kind: 'original',
     text: 'Hello world test post',
     createdAt: '2026-09-10T10:00:00.000Z',
+    version: 1,
+    isEdited: false,
+    editedAt: null,
     author: {
       id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       handle: 'testuser',
@@ -195,7 +201,9 @@ describe('DTO Mappers (D04 — Response DTO Safety)', () => {
     expect(responseDto.hasMore).toBe(true);
     expect(responseDto.nextCursor).toBe('cursor_abc123');
     expect(responseDto.items).toHaveLength(1);
-    expect(responseDto.items[0].id).toBe('11111111-1111-4111-8111-000000000001');
+    expect(responseDto.items[0].id).toBe(
+      '11111111-1111-4111-8111-000000000001',
+    );
     expect((responseDto.items[0] as any).replyToId).toBeUndefined();
   });
 

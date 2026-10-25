@@ -110,6 +110,34 @@ describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
       }
     });
 
+    it('returns no replies when the parent post is soft-deleted', async () => {
+      const parent = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Parent post to delete',
+      });
+      createdPostIds.push(parent.id);
+
+      const reply = await repository.createPost({
+        authorId: rahulId,
+        kind: 'reply',
+        replyToId: parent.id,
+        text: 'Reply under parent',
+      });
+      createdPostIds.push(reply.id);
+
+      await repository.deletePost({
+        postId: parent.id,
+        authorId: ashaId,
+      });
+
+      const result = await repository.listReplies(parent.id, null, 10, null);
+
+      expect(result.items).toHaveLength(0);
+      expect(result.hasMore).toBe(false);
+      expect(result.nextCursor).toBeNull();
+    });
+
     it('searchOriginals supports anonymous viewers', async () => {
       const result = await repository.searchOriginals(
         'database',
@@ -585,6 +613,236 @@ describe('DrizzleSocialFeedRepository PostgreSQL Integration', () => {
           }),
         ).rejects.toThrow(InvalidTargetError);
       }
+    });
+
+    it('updates an owned post and increments its version', async () => {
+      const created = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Original lifecycle text',
+      });
+      createdPostIds.push(created.id);
+
+      const updated = await repository.updatePost({
+        postId: created.id,
+        authorId: ashaId,
+        text: 'Updated lifecycle text',
+        expectedVersion: 1,
+      });
+
+      expect(updated.status).toBe('updated');
+
+      if (updated.status === 'updated') {
+        expect(updated.post.text).toBe('Updated lifecycle text');
+        expect(updated.post.version).toBe(2);
+        expect(updated.post.isEdited).toBe(true);
+        expect(updated.post.editedAt).not.toBeNull();
+      }
+    });
+
+    it('rejects a stale post version', async () => {
+      const created = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Version conflict test',
+      });
+      createdPostIds.push(created.id);
+
+      await repository.updatePost({
+        postId: created.id,
+        authorId: ashaId,
+        text: 'First update',
+        expectedVersion: 1,
+      });
+
+      const staleUpdate = await repository.updatePost({
+        postId: created.id,
+        authorId: ashaId,
+        text: 'Stale update',
+        expectedVersion: 1,
+      });
+
+      expect(staleUpdate.status).toBe('conflict');
+    });
+
+    it('soft-deletes an owned post and hides it from reads', async () => {
+      const created = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Post to soft-delete',
+      });
+      createdPostIds.push(created.id);
+
+      const deletion = await repository.deletePost({
+        postId: created.id,
+        authorId: ashaId,
+      });
+
+      expect(deletion.status).toBe('deleted');
+
+      const detail = await repository.getPostById(created.id, null);
+      expect(detail).toBeNull();
+
+      const repeatedDeletion = await repository.deletePost({
+        postId: created.id,
+        authorId: ashaId,
+      });
+      expect(repeatedDeletion.status).toBe('deleted');
+    });
+
+    it('excludes soft-deleted original posts from profile post counts', async () => {
+      const created = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Profile count soft-delete regression test',
+      });
+      createdPostIds.push(created.id);
+
+      const profileBeforeDelete = await repository.getUserById(ashaId);
+      expect(profileBeforeDelete).not.toBeNull();
+
+      const countBeforeDelete = profileBeforeDelete!.postCount;
+
+      expect(countBeforeDelete).toBeGreaterThan(0);
+
+      const deletion = await repository.deletePost({
+        postId: created.id,
+        authorId: ashaId,
+      });
+
+      expect(deletion.status).toBe('deleted');
+
+      const profileAfterDelete = await repository.getUserById(ashaId);
+      expect(profileAfterDelete).not.toBeNull();
+      expect(profileAfterDelete!.postCount).toBe(countBeforeDelete - 1);
+    });
+
+    it('rejects editing another user’s post', async () => {
+      const created = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Ownership test',
+      });
+      createdPostIds.push(created.id);
+
+      const result = await repository.updatePost({
+        postId: created.id,
+        authorId: rahulId,
+        text: 'Unauthorized change',
+        expectedVersion: 1,
+      });
+
+      expect(result.status).toBe('forbidden');
+
+      const unchanged = await repository.getPostById(created.id, null);
+      expect(unchanged?.text).toBe('Ownership test');
+      expect(unchanged?.version).toBe(1);
+    });
+
+    it('rejects editing a post outside the 30-minute window', async () => {
+      const created = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Expired edit window test',
+      });
+      createdPostIds.push(created.id);
+
+      // Backdate the post beyond the permitted editing window.
+      await db
+        .update(posts)
+        .set({ createdAt: new Date(Date.now() - 31 * 60 * 1000) })
+        .where(eq(posts.id, created.id));
+
+      const result = await repository.updatePost({
+        postId: created.id,
+        authorId: ashaId,
+        text: 'Too late to edit',
+        expectedVersion: 1,
+      });
+
+      expect(result.status).toBe('edit_window_expired');
+    });
+
+    it('prevents another user from deleting a post', async () => {
+      const created = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Delete ownership test',
+      });
+      createdPostIds.push(created.id);
+
+      const result = await repository.deletePost({
+        postId: created.id,
+        authorId: rahulId,
+      });
+
+      expect(result.status).toBe('forbidden');
+
+      const stillVisible = await repository.getPostById(created.id, null);
+      expect(stillVisible).not.toBeNull();
+    });
+
+    it('rejects likes on a soft-deleted post', async () => {
+      const created = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Deleted post like test',
+      });
+      createdPostIds.push(created.id);
+
+      await repository.deletePost({
+        postId: created.id,
+        authorId: ashaId,
+      });
+
+      await expect(
+        repository.setLike(created.id, rahulId, true),
+      ).rejects.toThrow(NotFoundDomainError);
+    });
+
+    it('rejects a reply to a soft-deleted post', async () => {
+      const target = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Deleted reply target',
+      });
+      createdPostIds.push(target.id);
+
+      await repository.deletePost({
+        postId: target.id,
+        authorId: ashaId,
+      });
+
+      await expect(
+        repository.createPost({
+          authorId: rahulId,
+          kind: 'reply',
+          replyToId: target.id,
+          text: 'Reply to deleted post',
+        }),
+      ).rejects.toThrow(NotFoundDomainError);
+    });
+
+    it('rejects a repost of a soft-deleted post', async () => {
+      const target = await repository.createPost({
+        authorId: ashaId,
+        kind: 'original',
+        text: 'Deleted repost target',
+      });
+      createdPostIds.push(target.id);
+
+      await repository.deletePost({
+        postId: target.id,
+        authorId: ashaId,
+      });
+
+      await expect(
+        repository.createPost({
+          authorId: rahulId,
+          kind: 'repost',
+          repostOfId: target.id,
+        }),
+      ).rejects.toThrow(NotFoundDomainError);
     });
   });
 

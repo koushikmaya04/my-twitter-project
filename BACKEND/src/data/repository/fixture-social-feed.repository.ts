@@ -17,6 +17,10 @@ import type {
   SocialFeedRepository,
   UserRecord,
   UpdateProfileCommand,
+  UpdatePostCommand,
+  UpdatePostResult,
+  DeletePostCommand,
+  DeletePostResult,
 } from './social-feed.repository';
 
 import {
@@ -29,6 +33,19 @@ import {
 } from '../fixtures/fixture-data';
 
 import { validateCursor } from '../../common/cursor-validation/cursor.validation';
+
+type FixturePostEditState = {
+  version: number;
+  isEdited: boolean;
+  editedAt: string | null;
+};
+
+const fixturePostEditStates = new Map<string, FixturePostEditState>();
+const fixtureDeletedPostIds = new Set<string>();
+
+export function resetFixtureDeletedPosts(): void {
+  fixtureDeletedPostIds.clear();
+}
 
 @Injectable()
 export class FixtureSocialFeedRepository implements SocialFeedRepository {
@@ -142,8 +159,10 @@ export class FixtureSocialFeedRepository implements SocialFeedRepository {
     let filteredPosts = originalPosts.filter(
       (post) =>
         eligibleAuthorIds.has(post.authorId) &&
-        activeUserIds.has(post.authorId),
+        activeUserIds.has(post.authorId) &&
+        !fixtureDeletedPostIds.has(post.id),
     );
+
     // Keep the same stable ordering as the public feed.
     filteredPosts.sort((a, b) => {
       const dateDifference =
@@ -198,10 +217,9 @@ export class FixtureSocialFeedRepository implements SocialFeedRepository {
     await this.waitIfConfigured();
     const post = posts.find((item) => item.id === id);
 
-    if (!post) {
+    if (!post || fixtureDeletedPostIds.has(post.id)) {
       return null;
     }
-
     return this.toPostRecord(post, viewerId);
   }
 
@@ -256,9 +274,18 @@ export class FixtureSocialFeedRepository implements SocialFeedRepository {
   ): Promise<PaginatedResult<PostRecord>> {
     await this.waitIfConfigured();
     this.checkReadFailure();
-
+    if (fixtureDeletedPostIds.has(postId)) {
+      return {
+        items: [],
+        nextCursor: null,
+        hasMore: false,
+      };
+    }
     let replies = posts.filter(
-      (item) => item.kind === 'reply' && item.replyToId === postId,
+      (item) =>
+        item.kind === 'reply' &&
+        item.replyToId === postId &&
+        !fixtureDeletedPostIds.has(item.id),
     );
 
     replies.sort((a, b) => {
@@ -310,7 +337,12 @@ export class FixtureSocialFeedRepository implements SocialFeedRepository {
 
     const userOriginalPostIds = new Set(
       posts
-        .filter((p) => p.authorId === userId && p.kind === 'original')
+        .filter(
+          (p) =>
+            p.authorId === userId &&
+            p.kind === 'original' &&
+            !fixtureDeletedPostIds.has(p.id),
+        )
         .map((p) => p.id),
     );
 
@@ -392,8 +424,10 @@ export class FixtureSocialFeedRepository implements SocialFeedRepository {
     this.checkReadFailure();
 
     const lowerQuery = query.toLowerCase();
-    let matching = originalPosts.filter((p) =>
-      p.text?.toLowerCase().includes(lowerQuery),
+    let matching = originalPosts.filter(
+      (p) =>
+        !fixtureDeletedPostIds.has(p.id) &&
+        p.text?.toLowerCase().includes(lowerQuery),
     );
 
     matching.sort((a, b) => {
@@ -450,6 +484,75 @@ export class FixtureSocialFeedRepository implements SocialFeedRepository {
     return this.toPostRecord(newPost, command.authorId);
   }
 
+  async updatePost(command: UpdatePostCommand): Promise<UpdatePostResult> {
+    await this.waitIfConfigured();
+    this.checkReadFailure();
+
+    const post = posts.find((item) => item.id === command.postId);
+
+    if (!post) {
+      return { status: 'not_found' };
+    }
+
+    if (post.authorId !== command.authorId) {
+      return { status: 'forbidden' };
+    }
+
+    if (post.kind === 'repost') {
+      return { status: 'not_editable' };
+    }
+
+    const editDeadline = new Date(post.createdAt).getTime() + 30 * 60 * 1000;
+
+    if (Date.now() > editDeadline) {
+      return { status: 'edit_window_expired' };
+    }
+
+    const currentState = fixturePostEditStates.get(post.id);
+    const currentVersion = currentState?.version ?? 1;
+
+    if (command.expectedVersion !== currentVersion) {
+      return { status: 'conflict' };
+    }
+
+    post.text = command.text;
+
+    const editState: FixturePostEditState = {
+      version: currentVersion + 1,
+      isEdited: true,
+      editedAt: new Date().toISOString(),
+    };
+
+    fixturePostEditStates.set(post.id, editState);
+
+    const updatedPost = this.toPostRecord(post, command.authorId);
+
+    return {
+      status: 'updated',
+      post: updatedPost,
+    };
+  }
+
+  async deletePost(command: DeletePostCommand): Promise<DeletePostResult> {
+    await this.waitIfConfigured();
+    this.checkReadFailure();
+
+    const post = posts.find((item) => item.id === command.postId);
+
+    if (!post) {
+      return { status: 'not_found' };
+    }
+
+    if (post.authorId !== command.authorId) {
+      return { status: 'forbidden' };
+    }
+
+    // Repeated deletion by the owner is safe and idempotent.
+    fixtureDeletedPostIds.add(post.id);
+
+    return { status: 'deleted' };
+  }
+
   async setLike(
     postId: string,
     viewerId: string,
@@ -459,7 +562,9 @@ export class FixtureSocialFeedRepository implements SocialFeedRepository {
     likeCount: number;
   }> {
     await this.waitIfConfigured();
+
     const currentCount = likes.filter((l) => l.postId === postId).length;
+
     return {
       likedByViewer: desiredState,
       likeCount: desiredState
@@ -652,8 +757,11 @@ export class FixtureSocialFeedRepository implements SocialFeedRepository {
     const likedByViewer =
       viewerId !== null &&
       likes.some((like) => like.postId === post.id && like.userId === viewerId);
-
+    const editState = fixturePostEditStates.get(post.id);
     return {
+      version: editState?.version ?? 1,
+      isEdited: editState?.isEdited ?? false,
+      editedAt: editState?.editedAt ?? null,
       id: post.id,
       kind: post.kind,
       text: post.text,

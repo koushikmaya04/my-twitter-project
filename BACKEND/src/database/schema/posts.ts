@@ -1,16 +1,15 @@
-
 import {
   pgTable,
   uuid,
   text,
   timestamp,
+  integer,
+  boolean,
   check,
   index,
   uniqueIndex,
   foreignKey,
 } from 'drizzle-orm/pg-core';
-
-
 
 import { sql } from 'drizzle-orm';
 
@@ -37,34 +36,42 @@ export const posts = pgTable(
     })
       .notNull()
       .defaultNow(),
+    version: integer('version').notNull().default(1),
 
-  replyToId: uuid('reply_to_id'),
+    deletedAt: timestamp('deleted_at', {
+      withTimezone: true,
+      precision: 3,
+    }),
 
-repostOfId: uuid('repost_of_id'),
+    isEdited: boolean('is_edited').notNull().default(false),
 
+    editedAt: timestamp('edited_at', {
+      withTimezone: true,
+      precision: 3,
+    }),
+    replyToId: uuid('reply_to_id'),
+
+    repostOfId: uuid('repost_of_id'),
   },
   (table) => [
-    index('posts_feed_idx').on(
-  table.createdAt.desc(),
-  table.id.desc(),
-),
+    index('posts_feed_idx').on(table.createdAt.desc(), table.id.desc()),
 
     index('posts_author_feed_idx').on(
-  table.authorId,
-  table.createdAt.desc(),
-  table.id.desc(),
-),
+      table.authorId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
 
-   index('posts_reply_idx').on(
-   table.replyToId,
-   table.createdAt.desc(),
-   table.id.desc(),
-),
-   index('posts_repost_idx').on(
-    table.repostOfId,
-    table.createdAt.desc(),
-    table.id.desc(),
-),
+    index('posts_reply_idx').on(
+      table.replyToId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    index('posts_repost_idx').on(
+      table.repostOfId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
     foreignKey({
       columns: [table.replyToId],
       foreignColumns: [table.id],
@@ -123,5 +130,6 @@ repostOfId: uuid('repost_of_id'),
         )
       )`,
     ),
+    check('posts_version_check', sql`${table.version} >= 1`),
   ],
 );

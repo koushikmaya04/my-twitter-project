@@ -956,8 +956,113 @@ it('rejects a display name that becomes empty after trimming', async () => {
     .expect(400);
 });
 
+  });
 
+  describe('Notification HTTP API', () => {
+    it('rejects /notifications without a session', async () => {
+      await request(app.getHttpServer())
+        .get('/notifications')
+        .expect(401);
+    });
 
+    it('rejects /notifications/unread-count without a session', async () => {
+      await request(app.getHttpServer())
+        .get('/notifications/unread-count')
+        .expect(401);
+    });
 
+    it('lists notifications, checks unread count, and marks read via HTTP API', async () => {
+      // 1. Register User A (Recipient)
+      const handleA = `user_a_${Date.now()}`;
+      const passwordA = 'Pass1234!';
+      const regA = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ handle: handleA, displayName: 'User A', password: passwordA })
+        .expect(201);
+      const userAId = regA.body.item.id;
+
+      const loginA = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ handle: handleA, password: passwordA })
+        .expect(200);
+      const cookieA = loginA.headers['set-cookie']
+        .find((c: string) => c.startsWith('session='))
+        .split(';')[0];
+
+      // 2. Register User B (Actor)
+      const handleB = `user_b_${Date.now()}`;
+      const passwordB = 'Pass1234!';
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ handle: handleB, displayName: 'User B', password: passwordB })
+        .expect(201);
+
+      const loginB = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ handle: handleB, password: passwordB })
+        .expect(200);
+      const cookieB = loginB.headers['set-cookie']
+        .find((c: string) => c.startsWith('session='))
+        .split(';')[0];
+
+      // Initially User A has 0 notifications
+      const initialUnread = await request(app.getHttpServer())
+        .get('/notifications/unread-count')
+        .set('Cookie', cookieA)
+        .expect(200);
+      expect(initialUnread.body.unreadCount).toBe(0);
+
+      // User B follows User A
+      await request(app.getHttpServer())
+        .post(`/users/${userAId}/follow`)
+        .set('Cookie', cookieB)
+        .expect(201);
+
+      // User A now has 1 unread notification
+      const afterFollowUnread = await request(app.getHttpServer())
+        .get('/notifications/unread-count')
+        .set('Cookie', cookieA)
+        .expect(200);
+      expect(afterFollowUnread.body.unreadCount).toBe(1);
+
+      // User A lists notifications
+      const listRes = await request(app.getHttpServer())
+        .get('/notifications?limit=10')
+        .set('Cookie', cookieA)
+        .expect(200);
+
+      expect(listRes.body.items).toHaveLength(1);
+      const notif = listRes.body.items[0];
+      expect(notif.type).toBe('follow');
+      expect(notif.isRead).toBe(false);
+      expect(notif.actor.handle).toBe(handleB);
+
+      // User B attempts to mark User A's notification as read (forbidden cross-user write)
+      await request(app.getHttpServer())
+        .patch(`/notifications/${notif.id}/read`)
+        .set('Cookie', cookieB)
+        .expect(403);
+
+      // User A marks the notification as read via PATCH
+      const patchRes = await request(app.getHttpServer())
+        .patch(`/notifications/${notif.id}/read`)
+        .set('Cookie', cookieA)
+        .expect(200);
+      expect(patchRes.body.item.isRead).toBe(true);
+
+      // Unread count is now 0
+      const finalUnread = await request(app.getHttpServer())
+        .get('/notifications/unread-count')
+        .set('Cookie', cookieA)
+        .expect(200);
+      expect(finalUnread.body.unreadCount).toBe(0);
+
+      // User A marks all as read via POST /notifications/read-all (idempotent)
+      const markAllRes = await request(app.getHttpServer())
+        .post('/notifications/read-all')
+        .set('Cookie', cookieA)
+        .expect(201);
+      expect(markAllRes.body.updatedCount).toBe(0);
+    });
   });
 });

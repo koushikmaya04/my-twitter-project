@@ -24,6 +24,7 @@ import { RequestLoggingMiddleware } from './common/request-logging/request-loggi
 import { DatabaseModule } from './database/database.module';
 
 import { AuthModule } from './auth/auth.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -44,6 +45,8 @@ import { AuthModule } from './auth/auth.module';
     SearchModule,
 
     AuthModule,
+
+    NotificationsModule,
   ],
 })
 export class AppModule {

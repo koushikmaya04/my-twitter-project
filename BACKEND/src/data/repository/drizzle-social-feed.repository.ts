@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, lt, or, sql, isNull, gte } from 'drizzle-orm';
 
 import { DATABASE } from '../../database/database.provider';
-import { follows, likes, postMedia, posts, users } from '../../database/schema';
+import { follows, likes, notifications, postMedia, posts, users } from '../../database/schema';
 
 import type {
   SocialFeedRepository,
@@ -743,6 +743,7 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
           .select({
             id: posts.id,
             kind: posts.kind,
+            authorId: posts.authorId,
           })
           .from(posts)
           .innerJoin(users, eq(posts.authorId, users.id))
@@ -764,15 +765,18 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
         }
       }
 
+      let target: Array<{ id: string; kind: string; authorId: string }> = [];
+
       if (kind === 'repost') {
         if (!repostOfId) {
           throw new InvalidTargetError('repostOfId is required for repost');
         }
 
-        const target = await tx
+        target = await tx
           .select({
             id: posts.id,
             kind: posts.kind,
+            authorId: posts.authorId,
           })
           .from(posts)
           .innerJoin(users, eq(posts.authorId, users.id))
@@ -810,6 +814,55 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
           throw new ConflictDomainError('Duplicate repost is not allowed');
         }
         throw error;
+      }
+
+      if (kind === 'reply' && replyToId) {
+        const [parentPost] = await tx
+          .select({ authorId: posts.authorId })
+          .from(posts)
+          .where(eq(posts.id, replyToId))
+          .limit(1);
+
+        if (parentPost && parentPost.authorId !== authorId) {
+          await tx
+            .insert(notifications)
+            .values({
+              id: randomUUID(),
+              recipientId: parentPost.authorId,
+              actorId: authorId,
+              type: 'reply',
+              postId: replyToId,
+              replyId: postId,
+              dedupKey: `reply:${postId}`,
+              isRead: false,
+              readAt: null,
+            });
+        }
+      }
+
+      if (kind === 'repost' && repostOfId && target.length > 0) {
+        if (target[0].authorId !== authorId) {
+          await tx
+            .insert(notifications)
+            .values({
+              id: randomUUID(),
+              recipientId: target[0].authorId,
+              actorId: authorId,
+              type: 'repost',
+              postId: repostOfId,
+              dedupKey: `repost:${authorId}:${repostOfId}`,
+              isRead: false,
+              readAt: null,
+            })
+            .onConflictDoUpdate({
+              target: notifications.dedupKey,
+              set: {
+                isRead: false,
+                readAt: null,
+                createdAt: new Date(),
+              },
+            });
+        }
       }
 
       const result = await this.getPostById(postId, authorId, tx);
@@ -957,49 +1010,77 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
     likedByViewer: boolean;
     likeCount: number;
   }> {
-    const post = await this.db
-      .select({ id: posts.id })
-      .from(posts)
-      .where(and(eq(posts.id, postId), isNull(posts.deletedAt)))
-      .limit(1);
+    return this.db.transaction(async (tx: any) => {
+      const postRows = await tx
+        .select({ id: posts.id, authorId: posts.authorId })
+        .from(posts)
+        .where(and(eq(posts.id, postId), isNull(posts.deletedAt)))
+        .limit(1);
 
-    if (post.length === 0) {
-      throw new NotFoundDomainError('Post does not exist');
-    }
+      if (postRows.length === 0) {
+        throw new NotFoundDomainError('Post does not exist');
+      }
 
-    if (desiredState) {
-      await this.db
-        .insert(likes)
-        .values({
-          userId: viewerId,
-          postId,
+      const post = postRows[0];
+
+      if (desiredState) {
+        const insertedLike = await tx
+          .insert(likes)
+          .values({
+            userId: viewerId,
+            postId,
+          })
+          .onConflictDoNothing({
+            target: [likes.userId, likes.postId],
+          })
+          .returning({ userId: likes.userId });
+
+        if (insertedLike.length > 0 && post.authorId !== viewerId) {
+          await tx
+            .insert(notifications)
+            .values({
+              id: randomUUID(),
+              recipientId: post.authorId,
+              actorId: viewerId,
+              type: 'like',
+              postId,
+              dedupKey: `like:${viewerId}:${postId}`,
+              isRead: false,
+              readAt: null,
+            })
+            .onConflictDoUpdate({
+              target: notifications.dedupKey,
+              set: {
+                isRead: false,
+                readAt: null,
+                createdAt: new Date(),
+              },
+            });
+        }
+      } else {
+        await tx
+          .delete(likes)
+          .where(and(eq(likes.userId, viewerId), eq(likes.postId, postId)));
+      }
+
+      const [result] = await tx
+        .select({
+          count: sql<number>`count(*)::int`,
         })
-        .onConflictDoNothing({
-          target: [likes.userId, likes.postId],
-        });
-    } else {
-      await this.db
-        .delete(likes)
-        .where(and(eq(likes.userId, viewerId), eq(likes.postId, postId)));
-    }
+        .from(likes)
+        .where(eq(likes.postId, postId));
 
-    const [result] = await this.db
-      .select({
-        count: sql<number>`count(*)::int`,
-      })
-      .from(likes)
-      .where(eq(likes.postId, postId));
+      const viewerLike = await tx
+        .select({ userId: likes.userId })
+        .from(likes)
+        .where(and(eq(likes.userId, viewerId), eq(likes.postId, postId)))
+        .limit(1);
 
-    const viewerLike = await this.db
-      .select({ userId: likes.userId })
-      .from(likes)
-      .where(and(eq(likes.userId, viewerId), eq(likes.postId, postId)))
-      .limit(1);
-
-    return {
-      likedByViewer: viewerLike.length > 0,
-      likeCount: Number(result.count),
-    };
+      return {
+        likedByViewer: viewerLike.length > 0,
+        likeCount: Number(result.count),
+      };
+    });
   }
 
   async setFollow(
@@ -1017,76 +1098,101 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
       throw new InvalidTargetError('A user cannot follow themselves');
     }
 
-    const [follower] = await this.db
-      .select({ id: users.id })
-      .from(users)
-      .where(and(eq(users.id, followerId), isNull(users.deactivatedAt)))
-      .limit(1);
+    return this.db.transaction(async (tx: any) => {
+      const [follower] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.id, followerId), isNull(users.deactivatedAt)))
+        .limit(1);
 
-    if (!follower) {
-      throw new NotFoundDomainError('Follower account not found');
-    }
+      if (!follower) {
+        throw new NotFoundDomainError('Follower account not found');
+      }
 
-    const [target] = await this.db
-      .select({ id: users.id })
-      .from(users)
-      .where(and(eq(users.id, followingId), isNull(users.deactivatedAt)))
-      .limit(1);
+      const [target] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.id, followingId), isNull(users.deactivatedAt)))
+        .limit(1);
 
-    if (!target) {
-      throw new NotFoundDomainError('Target account not found');
-    }
+      if (!target) {
+        throw new NotFoundDomainError('Target account not found');
+      }
 
-    if (desiredState) {
-      await this.db
-        .insert(follows)
-        .values({ followerId, followingId })
-        .onConflictDoNothing({
-          target: [follows.followerId, follows.followingId],
-        });
-    } else {
-      await this.db
-        .delete(follows)
+      if (desiredState) {
+        const insertedFollow = await tx
+          .insert(follows)
+          .values({ followerId, followingId })
+          .onConflictDoNothing({
+            target: [follows.followerId, follows.followingId],
+          })
+          .returning({ followerId: follows.followerId });
+
+        if (insertedFollow.length > 0 && followerId !== followingId) {
+          await tx
+            .insert(notifications)
+            .values({
+              id: randomUUID(),
+              recipientId: followingId,
+              actorId: followerId,
+              type: 'follow',
+              dedupKey: `follow:${followerId}:${followingId}`,
+              isRead: false,
+              readAt: null,
+            })
+            .onConflictDoUpdate({
+              target: notifications.dedupKey,
+              set: {
+                isRead: false,
+                readAt: null,
+                createdAt: new Date(),
+              },
+            });
+        }
+      } else {
+        await tx
+          .delete(follows)
+          .where(
+            and(
+              eq(follows.followerId, followerId),
+              eq(follows.followingId, followingId),
+            ),
+          );
+      }
+
+      const [state] = await tx
+        .select({ id: follows.followerId })
+        .from(follows)
         .where(
           and(
             eq(follows.followerId, followerId),
             eq(follows.followingId, followingId),
           ),
+        )
+        .limit(1);
+
+      const [followerCountRow] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(follows)
+        .innerJoin(users, eq(follows.followerId, users.id))
+        .where(
+          and(eq(follows.followingId, followingId), isNull(users.deactivatedAt)),
         );
-    }
 
-    const [state] = await this.db
-      .select({ id: follows.followerId })
-      .from(follows)
-      .where(
-        and(
-          eq(follows.followerId, followerId),
-          eq(follows.followingId, followingId),
-        ),
-      )
-      .limit(1);
+      const [followingCountRow] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(follows)
+        .innerJoin(users, eq(follows.followingId, users.id))
+        .where(
+          and(eq(follows.followerId, followerId), isNull(users.deactivatedAt)),
+        );
 
-    const [followerCountRow] = await this.db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(follows)
-      .innerJoin(users, eq(follows.followerId, users.id))
-      .where(
-        and(eq(follows.followingId, followingId), isNull(users.deactivatedAt)),
-      );
-
-    const [followingCountRow] = await this.db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(follows)
-      .innerJoin(users, eq(follows.followingId, users.id))
-      .where(
-        and(eq(follows.followerId, followerId), isNull(users.deactivatedAt)),
-      );
-
-    return {
-      following: Boolean(state),
-      followerCount: followerCountRow?.count ?? 0,
-      followingCount: followingCountRow?.count ?? 0,
-    };
+      return {
+        following: Boolean(state),
+        followerCount: followerCountRow?.count ?? 0,
+        followingCount: followingCountRow?.count ?? 0,
+      };
+    });
   }
 
   async isFollowing(followerId: string, followingId: string): Promise<boolean> {

@@ -6,6 +6,9 @@ import { NotificationsService } from './notifications.service';
 import { DATABASE } from '../database/database.provider';
 import { NotFoundDomainError } from '../common/errors/domain-errors';
 
+const mockResolved = (value: unknown) =>
+  jest.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(value);
+
 describe('NotificationsService', () => {
   let service: NotificationsService;
   let db: any;
@@ -46,7 +49,7 @@ describe('NotificationsService', () => {
         leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
-        limit: jest.fn<any>().mockResolvedValue([]),
+        limit: mockResolved([]),
       };
 
       db.select.mockReturnValue(query);
@@ -88,7 +91,7 @@ describe('NotificationsService', () => {
         leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
-        limit: jest.fn<any>().mockResolvedValue(mockRows),
+        limit: mockResolved(mockRows),
       };
 
       db.select.mockReturnValue(query);
@@ -110,7 +113,7 @@ describe('NotificationsService', () => {
         from: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         leftJoin: jest.fn().mockReturnThis(),
-        where: jest.fn<any>().mockResolvedValue([{ count: 5 }]),
+        where: mockResolved([{ count: 5 }]),
       };
 
       db.select.mockReturnValue(query);
@@ -132,14 +135,12 @@ describe('NotificationsService', () => {
       const selectInitial = {
         from: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        limit: jest
-          .fn<any>()
-          .mockResolvedValue([{ id: notificationId, recipientId }]),
+        limit: mockResolved([{ id: notificationId, recipientId }]),
       };
 
       const updateQuery = {
         set: jest.fn().mockReturnThis(),
-        where: jest.fn<any>().mockResolvedValue([]),
+        where: mockResolved([]),
       };
 
       const now = new Date();
@@ -148,27 +149,27 @@ describe('NotificationsService', () => {
         innerJoin: jest.fn().mockReturnThis(),
         leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        limit: jest.fn<any>().mockResolvedValue([
-          {
-            id: notificationId,
-            type: 'follow',
-            isRead: true,
-            readAt: now,
-            createdAt: now,
-            actorId: '33333333-3333-4333-8333-333333333333',
-            actorHandle: 'test_actor',
-            actorDisplayName: 'Test Actor',
-            actorSmallUrl: null,
-            actorLargeUrl: null,
-            postId: null,
-            postKind: null,
-            postText: null,
-            postCreatedAt: null,
-            replyId: null,
-            replyText: null,
-            replyCreatedAt: null,
-          },
-        ]),
+        limit: mockResolved([
+  {
+    id: notificationId,
+    type: 'follow',
+    isRead: true,
+    readAt: now,
+    createdAt: now,
+    actorId: '33333333-3333-4333-8333-333333333333',
+    actorHandle: 'test_actor',
+    actorDisplayName: 'Test Actor',
+    actorSmallUrl: null,
+    actorLargeUrl: null,
+    postId: null,
+    postKind: null,
+    postText: null,
+    postCreatedAt: null,
+    replyId: null,
+    replyText: null,
+    replyCreatedAt: null,
+  },
+]),
       };
 
       db.select
@@ -187,12 +188,12 @@ describe('NotificationsService', () => {
       const selectInitial = {
         from: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        limit: jest.fn<any>().mockResolvedValue([
-          {
-            id: notificationId,
-            recipientId: 'different-user-uuid',
-          },
-        ]),
+       limit: mockResolved([
+  {
+    id: notificationId,
+    recipientId: 'different-user-uuid',
+  },
+]),
       };
 
       db.select.mockReturnValueOnce(selectInitial);
@@ -208,7 +209,7 @@ describe('NotificationsService', () => {
       const selectInitial = {
         from: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        limit: jest.fn<any>().mockResolvedValue([]),
+        limit: mockResolved([]),
       };
 
       db.select.mockReturnValueOnce(selectInitial);
@@ -228,9 +229,10 @@ describe('NotificationsService', () => {
       const updateQuery = {
         set: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        returning: jest
-          .fn<any>()
-          .mockResolvedValue([{ id: 'notif-1' }, { id: 'notif-2' }]),
+        returning: mockResolved([
+  { id: 'notif-1' },
+  { id: 'notif-2' },
+]),
       };
 
       db.update.mockReturnValue(updateQuery);

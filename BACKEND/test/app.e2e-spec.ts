@@ -985,9 +985,18 @@ it('rejects a display name that becomes empty after trimming', async () => {
         .post('/auth/login')
         .send({ handle: handleA, password: passwordA })
         .expect(200);
-      const cookieA = loginA.headers['set-cookie']
-        .find((c: string) => c.startsWith('session='))
-        .split(';')[0];
+     const setCookieA = loginA.headers['set-cookie'];
+const cookieA = (
+  Array.isArray(setCookieA)
+    ? setCookieA
+    : setCookieA
+      ? [setCookieA]
+      : []
+).find((c: string) => c.startsWith('session='))?.split(';')[0];
+
+if (!cookieA) {
+  throw new Error('Session cookie for User A was not found');
+}
 
       // 2. Register User B (Actor)
       const handleB = `user_b_${Date.now()}`;
@@ -1001,9 +1010,18 @@ it('rejects a display name that becomes empty after trimming', async () => {
         .post('/auth/login')
         .send({ handle: handleB, password: passwordB })
         .expect(200);
-      const cookieB = loginB.headers['set-cookie']
-        .find((c: string) => c.startsWith('session='))
-        .split(';')[0];
+      const setCookieB = loginB.headers['set-cookie'];
+const cookieB = (
+  Array.isArray(setCookieB)
+    ? setCookieB
+    : setCookieB
+      ? [setCookieB]
+      : []
+).find((c: string) => c.startsWith('session='))?.split(';')[0];
+
+if (!cookieB) {
+  throw new Error('Session cookie for User B was not found');
+}
 
       // Initially User A has 0 notifications
       const initialUnread = await request(app.getHttpServer())

@@ -1,19 +1,18 @@
-import React, { useState, useCallback, memo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import TweetActions from '../TweetActions/TweetActions.jsx';
 import CommentSection from '../CommentSection/CommentSection.jsx';
 import ImageModal from '../ImageModal/ImageModal.jsx';
 import { useLazyImages } from '../../hooks/useLazyImages.js';
 import { fetchPostById } from '../../services/api.js';
 import Tweet from '../../models/Tweet.js';
+import { DEFAULT_AVATAR } from '../../utils/constants.js';
 import './TweetCard.css';
 
 /**
  * TweetCard — Displays a single tweet in the feed.
- * Uses lazy image loading with concurrency queue (max 3).
- * Memoized with React.memo to prevent unnecessary re-renders.
- *
- * Supports clicking the post card to open the post detail / image modal,
- * calling the backend detail API (GET /posts/:id), and displaying the image.
+ * Supports:
+ * - P0-02/P0-03: View profile on click, follow/unfollow toggle.
+ * - P0-05: Edit within 30-minute window (optimistic concurrency version check) and Delete.
  */
 const TweetCard = memo(
   ({
@@ -22,14 +21,27 @@ const TweetCard = memo(
     onRetweet,
     onComment,
     onFollow,
+    onEdit,
+    onDelete,
+    onViewUserProfile,
     isFollowing,
     currentUser,
     onRequestIdUpdate,
+    onOpenAuth,
   }) => {
     const [showComments, setShowComments] = useState(false);
     const [isImageOpen, setIsImageOpen] = useState(false);
     const [detailTweet, setDetailTweet] = useState(null);
     const [imageFailed, setImageFailed] = useState(false);
+
+    // Edit & Menu State
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editText, setEditText] = useState(tweet.content || '');
+    const [isSavingEdit, setIsSavingEdit] = useState(false);
+    const [editError, setEditError] = useState(null);
+    const menuRef = useRef(null);
+
     const {
       imgRef,
       src: imageSrc,
@@ -37,23 +49,32 @@ const TweetCard = memo(
       hasError: imageError,
     } = useLazyImages(tweet.thumbnailUrl, tweet.imageUrl);
 
+    useEffect(() => {
+      setEditText(tweet.content || '');
+    }, [tweet.content]);
+
+    // Close menu on outside click
+    useEffect(() => {
+      const handleClickOutside = (e) => {
+        if (menuRef.current && !menuRef.current.contains(e.target)) {
+          setIsMenuOpen(false);
+        }
+      };
+      if (isMenuOpen) {
+        document.addEventListener('mousedown', handleClickOutside);
+      }
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isMenuOpen]);
+
     const handleToggleComments = useCallback(() => {
       setShowComments((prev) => !prev);
     }, []);
 
-    /**
-     * Post click handler:
-     * - Triggers modal open.
-     * - Calls the detail API endpoint (GET /posts/:id).
-     * - Reads media array and updates detail state.
-     * - Does NOT trigger when clicking interactive controls (buttons, links, actions).
-     */
     const handleCardClick = useCallback(
       async (e) => {
-        // Block modal when user clicks interactive buttons or links
         if (
           e.target.closest(
-            'button, a, input, textarea, .tweet-card__header-actions, .tweet-actions, .comment-section'
+            'button, a, input, textarea, .tweet-card__header-actions, .tweet-actions, .comment-section, .tweet-card__edit-box, .tweet-card__author-info, .tweet-card__avatar'
           )
         ) {
           return;
@@ -89,15 +110,70 @@ const TweetCard = memo(
       setIsImageOpen(false);
     }, []);
 
-    /**
-     * Gracefully handle image load failure.
-     */
     const handleImageError = useCallback(() => {
       setImageFailed(true);
     }, []);
 
-    const isOwnTweet = currentUser && tweet.handle === currentUser.handle;
+    // Check ownership
+    const isOwnTweet =
+      Boolean(currentUser) &&
+      ((tweet.authorId && currentUser.id === tweet.authorId) ||
+        tweet.handle === currentUser.handle ||
+        tweet.handle === `@${currentUser.handle}`);
+
+    // Check 30-minute edit eligibility (P0-05)
+    const canEdit = (() => {
+      if (!isOwnTweet) return false;
+      if (tweet.kind === 'repost') return false;
+      if (!tweet.createdAt) return true;
+      const createdTime = new Date(tweet.createdAt).getTime();
+      return Date.now() - createdTime <= 30 * 60 * 1000;
+    })();
+
+    const handleSaveEdit = async () => {
+      if (!editText.trim()) {
+        setEditError('Post text cannot be empty');
+        return;
+      }
+
+      setIsSavingEdit(true);
+      setEditError(null);
+
+      try {
+        await onEdit?.(tweet.id, editText.trim(), tweet.version || 1);
+        setIsEditing(false);
+      } catch (err) {
+        setEditError(err.message || 'Failed to update post');
+      } finally {
+        setIsSavingEdit(false);
+      }
+    };
+
+    const handleDeleteClick = () => {
+      setIsMenuOpen(false);
+      const confirmed = window.confirm('Are you sure you want to delete this post?');
+      if (confirmed) {
+        onDelete?.(tweet.id);
+      }
+    };
+
     const activeTweet = detailTweet || tweet;
+
+    const formatTimestamp = (raw) => {
+      if (!raw) return '';
+      try {
+        const date = new Date(raw);
+        if (isNaN(date.getTime())) return raw;
+        const diffMins = Math.floor((Date.now() - date.getTime()) / 60000);
+        if (diffMins < 1) return 'now';
+        if (diffMins < 60) return `${diffMins}m`;
+        const diffHours = Math.floor(diffMins / 60);
+        if (diffHours < 24) return `${diffHours}h`;
+        return `${Math.floor(diffHours / 24)}d`;
+      } catch {
+        return raw;
+      }
+    };
 
     return (
       <article
@@ -117,7 +193,7 @@ const TweetCard = memo(
             >
               <path d="M4.5 3.88l4.432 4.14-1.364 1.46L5.5 7.55V16c0 1.1.896 2 2 2H13v2H7.5c-2.209 0-4-1.79-4-4V7.55L1.432 9.48.068 8.02 4.5 3.88zM16.5 6H11V4h5.5c2.209 0 4 1.79 4 4v8.45l2.068-1.93 1.364 1.46-4.432 4.14-4.432-4.14 1.364-1.46 2.068 1.93V8c0-1.1-.896-2-2-2z" />
             </svg>
-            <span>{tweet.retweetedBy} reposted</span>
+            <span>{tweet.retweetedBy || 'Someone'} reposted</span>
           </div>
         )}
 
@@ -126,10 +202,20 @@ const TweetCard = memo(
           <div className="tweet-card__avatar-col">
             <img
               className="tweet-card__avatar"
-              src={tweet.avatar}
+              src={tweet.avatar || DEFAULT_AVATAR}
               alt=""
               aria-hidden="true"
               loading="lazy"
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = DEFAULT_AVATAR;
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (tweet.authorId) {
+                  onViewUserProfile?.(tweet.authorId);
+                }
+              }}
             />
           </div>
 
@@ -137,7 +223,15 @@ const TweetCard = memo(
           <div className="tweet-card__content">
             {/* Header: name, handle, timestamp */}
             <div className="tweet-card__header">
-              <div className="tweet-card__author-info">
+              <div
+                className="tweet-card__author-info"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (tweet.authorId) {
+                    onViewUserProfile?.(tweet.authorId);
+                  }
+                }}
+              >
                 <span className="tweet-card__author-name">{tweet.author}</span>
                 {tweet.verified && (
                   <svg
@@ -156,47 +250,124 @@ const TweetCard = memo(
                   ·
                 </span>
                 <time className="tweet-card__timestamp">
-                  {tweet.timestamp}
+                  {formatTimestamp(tweet.timestamp)}
                 </time>
+                {tweet.isEdited && (
+                  <span className="tweet-card__edited-badge" title={tweet.editedAt ? `Edited at ${tweet.editedAt}` : 'Edited'}>
+                    (edited)
+                  </span>
+                )}
               </div>
-              <div className="tweet-card__header-actions">
-                {!isOwnTweet && !isFollowing && (
+
+              <div className="tweet-card__header-actions" ref={menuRef}>
+                {!isOwnTweet && currentUser && (
                   <button
-                    className="tweet-card__follow-btn"
-                    onClick={() => onFollow?.(tweet.handle, tweet.author)}
-                    aria-label={`Follow ${tweet.author}`}
+                    className={`tweet-card__follow-btn ${
+                      isFollowing ? 'tweet-card__follow-btn--following' : ''
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onFollow?.(tweet.authorId || tweet.handle, tweet.author);
+                    }}
+                    aria-label={isFollowing ? `Unfollow ${tweet.author}` : `Follow ${tweet.author}`}
                   >
-                    Follow
+                    {isFollowing ? 'Following' : 'Follow'}
                   </button>
                 )}
-                {isFollowing && !isOwnTweet && (
-                  <button
-                    className="tweet-card__follow-btn tweet-card__follow-btn--following"
-                    onClick={() => onFollow?.(tweet.handle, tweet.author)}
-                    aria-label={`Unfollow ${tweet.author}`}
-                  >
-                    Following
-                  </button>
+
+                {isOwnTweet && (
+                  <>
+                    <button
+                      className="tweet-card__more-btn"
+                      aria-label="More options"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsMenuOpen((prev) => !prev);
+                      }}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        width="18"
+                        height="18"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path d="M3 12c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2zm9 2c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm7 0c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z" />
+                      </svg>
+                    </button>
+
+                    {isMenuOpen && (
+                      <div className="tweet-card__menu-dropdown" role="menu">
+                        {canEdit && (
+                          <button
+                            className="tweet-card__menu-item"
+                            role="menuitem"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsMenuOpen(false);
+                              setIsEditing(true);
+                            }}
+                          >
+                            Edit post
+                          </button>
+                        )}
+                        <button
+                          className="tweet-card__menu-item tweet-card__menu-item--danger"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteClick();
+                          }}
+                        >
+                          Delete post
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
-                <button
-                  className="tweet-card__more-btn"
-                  aria-label="More options"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="18"
-                    height="18"
-                    fill="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path d="M3 12c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2zm9 2c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm7 0c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z" />
-                  </svg>
-                </button>
               </div>
             </div>
 
-            {/* Tweet text */}
-            <p className="tweet-card__text">{tweet.content}</p>
+            {/* Tweet text / Edit Form */}
+            {isEditing ? (
+              <div
+                className="tweet-card__edit-box"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <textarea
+                  className="tweet-card__edit-textarea"
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  maxLength={280}
+                  autoFocus
+                />
+                {editError && (
+                  <span className="tweet-card__edit-error">{editError}</span>
+                )}
+                <div className="tweet-card__edit-actions">
+                  <button
+                    className="tweet-card__edit-cancel-btn"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setEditText(tweet.content || '');
+                      setEditError(null);
+                    }}
+                    disabled={isSavingEdit}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="tweet-card__edit-save-btn"
+                    onClick={handleSaveEdit}
+                    disabled={isSavingEdit || !editText.trim()}
+                  >
+                    {isSavingEdit ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="tweet-card__text">{tweet.content}</p>
+            )}
 
             {/* Tweet image (lazy loaded) */}
             {tweet.imageUrl && !imageFailed && (
@@ -266,12 +437,14 @@ const TweetCard = memo(
                 tweetId={tweet.id}
                 comments={tweet.comments || []}
                 onComment={onComment}
+                currentUser={currentUser}
+                onOpenAuth={onOpenAuth}
               />
             )}
           </div>
         </div>
 
-        {/* Image Lightbox / Modal */}
+        {/* Post Detail / Image Modal */}
         {isImageOpen && (
           <ImageModal
             tweet={activeTweet}
@@ -279,9 +452,9 @@ const TweetCard = memo(
             onLike={onLike}
             onRetweet={onRetweet}
             onComment={onComment}
-            onToggleComments={handleToggleComments}
-            showComments={showComments}
-            commentCount={activeTweet.commentCount}
+            currentUser={currentUser}
+            onOpenAuth={onOpenAuth}
+            onViewUserProfile={onViewUserProfile}
           />
         )}
       </article>

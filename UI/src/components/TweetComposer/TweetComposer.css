@@ -72,7 +72,8 @@
   background-color: rgba(29, 155, 240, 0.1);
 }
 
-.tweet-composer__post-btn {
+.tweet-composer__post-btn,
+.tweet-composer__submit-btn {
   padding: 8px 20px;
   background-color: var(--accent-blue);
   color: #fff;
@@ -84,11 +85,13 @@
   transition: background-color 0.2s;
 }
 
-.tweet-composer__post-btn:hover {
+.tweet-composer__post-btn:hover,
+.tweet-composer__submit-btn:hover {
   background-color: var(--accent-blue-hover);
 }
 
-.tweet-composer__post-btn:disabled {
+.tweet-composer__post-btn:disabled,
+.tweet-composer__submit-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

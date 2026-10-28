@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { DEFAULT_AVATAR } from '../../utils/constants.js';
 import './Trending.css';
 
 /**
@@ -15,7 +16,7 @@ const Trending = () => {
       time: '23 hours ago',
       source: 'News',
       posts: '124 posts',
-      avatars: ['https://i.pravatar.cc/24?img=1', 'https://i.pravatar.cc/24?img=2'],
+      avatars: [DEFAULT_AVATAR],
     },
     {
       category: 'Science',
@@ -23,7 +24,7 @@ const Trending = () => {
       time: '1 day ago',
       source: 'News',
       posts: '4,981 posts',
-      avatars: ['https://i.pravatar.cc/24?img=3', 'https://i.pravatar.cc/24?img=4', 'https://i.pravatar.cc/24?img=5'],
+      avatars: [DEFAULT_AVATAR],
     },
     {
       category: 'Business',
@@ -31,7 +32,7 @@ const Trending = () => {
       time: '6 hours ago',
       source: 'News',
       posts: '1,024 posts',
-      avatars: ['https://i.pravatar.cc/24?img=6', 'https://i.pravatar.cc/24?img=7', 'https://i.pravatar.cc/24?img=8'],
+      avatars: [DEFAULT_AVATAR],
     },
   ];
 
@@ -62,7 +63,16 @@ const Trending = () => {
               <div className="trending__news-meta">
                 <div className="trending__news-avatars">
                   {item.avatars.map((avatar, i) => (
-                    <img key={i} className="trending__news-avatar" src={avatar} alt="" />
+                    <img
+                      key={i}
+                      className="trending__news-avatar"
+                      src={avatar}
+                      alt=""
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = DEFAULT_AVATAR;
+                      }}
+                    />
                   ))}
                 </div>
                 <span>{item.time} · {item.source} · {item.posts}</span>

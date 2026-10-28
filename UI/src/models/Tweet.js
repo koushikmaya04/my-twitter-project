@@ -1,5 +1,6 @@
 import Post from './Post.js';
 import { resolveImageUrl } from '../services/api.js';
+import { DEFAULT_AVATAR } from '../utils/constants.js';
 
 /**
  * Tweet — Extends Post with image and category data.
@@ -24,15 +25,8 @@ class Tweet extends Post {
 
   /**
    * FACTORY METHOD: Transforms a JSONPlaceholder photo object into a Tweet instance.
-   * 
-   * JSONPlaceholder photo structure:
-   *   { albumId, id, title, url, thumbnailUrl }
-   * 
-   * This method converts that raw API data into our domain model,
-   * so the rest of the app never sees the raw API structure.
    */
   static fromAPIPhoto(photo) {
-    // Generate realistic-looking Twitter usernames and display names
     const usernames = [
       { author: 'Alex Thompson', handle: '@alexthompson' },
       { author: 'Sarah Chen', handle: '@sarahchen' },
@@ -59,15 +53,10 @@ class Tweet extends Post {
     const user = usernames[photo.id % usernames.length];
     const category = categories[photo.albumId % categories.length];
 
-    // Generate a semi-random time string
     const hours = (photo.id % 23) + 1;
     const timestamp = hours <= 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
-
-    // Generate semi-random like/retweet/comment counts based on the photo ID for consistency
     const baseLikes = ((photo.id * 17) % 500) + 10;
     const baseRetweets = ((photo.id * 13) % 100) + 2;
-
-    // Capitalize the first letter and add some tweet-like formatting to the title
     const formattedTitle = photo.title.charAt(0).toUpperCase() + photo.title.slice(1);
 
     const tweet = new Tweet({
@@ -75,11 +64,9 @@ class Tweet extends Post {
       content: formattedTitle,
       author: user.author,
       handle: user.handle,
-      avatar: `https://i.pravatar.cc/48?img=${photo.id % 70}`,
+      avatar: DEFAULT_AVATAR,
       timestamp: timestamp,
       likes: baseLikes,
-      // The API returns via.placeholder.com which is currently down/timing out globally.
-      // We dynamically swap it to picsum.photos so the UI actually works for the user.
       imageUrl: `https://picsum.photos/id/${(photo.id % 1000) + 1}/600/400`,
       thumbnailUrl: `https://picsum.photos/id/${(photo.id % 1000) + 1}/150/150`,
       albumId: photo.albumId,
@@ -93,13 +80,16 @@ class Tweet extends Post {
 
   static fromAPIPost(post) {
     const firstMedia = post.media?.[0] ?? null;
+    const authorHandle = post.author?.handle
+      ? (post.author.handle.startsWith('@') ? post.author.handle : `@${post.author.handle}`)
+      : '';
 
     const tweet = new Tweet({
       id: post.id,
       content: post.text ?? '',
       author: post.author?.displayName ?? '',
-      handle: post.author?.handle ?? '',
-      avatar: resolveImageUrl(post.author?.avatar?.smallUrl),
+      handle: authorHandle,
+      avatar: resolveImageUrl(post.author?.avatar?.smallUrl) || DEFAULT_AVATAR,
       timestamp: post.createdAt,
       likes: post.likeCount ?? 0,
       imageUrl: resolveImageUrl(firstMedia?.largeUrl) ?? null,
@@ -109,12 +99,22 @@ class Tweet extends Post {
       verified: false,
     });
 
-    tweet.retweetCount = 0;
+    tweet.authorId = post.author?.id ?? null;
+    tweet.version = post.version ?? 1;
+    tweet.isEdited = Boolean(post.isEdited);
+    tweet.editedAt = post.editedAt ?? null;
+    tweet.kind = post.kind ?? 'original';
+    tweet.createdAt = post.createdAt;
+    tweet.replyToId = post.replyToId ?? null;
+    tweet.repostOfId = post.repostOfId ?? null;
+    tweet.retweetCount = post.repostCount ?? 0;
     tweet.commentCount = post.replyCount ?? 0;
     tweet.isLiked = Boolean(post.likedByViewer);
+    tweet.isRetweeted = Boolean(post.repostedByViewer);
 
     return tweet;
   }
+
   /**
    * Override parent's toPlainObject to include Tweet-specific fields.
    * Demonstrates polymorphism — same method name, extended behavior.
@@ -122,6 +122,17 @@ class Tweet extends Post {
   toPlainObject() {
     return {
       ...super.toPlainObject(),
+      authorId: this.authorId,
+      version: this.version,
+      isEdited: this.isEdited,
+      editedAt: this.editedAt,
+      kind: this.kind,
+      createdAt: this.createdAt,
+      replyToId: this.replyToId,
+      repostOfId: this.repostOfId,
+      isRetweeted: this.isRetweeted,
+      retweetCount: this.retweetCount,
+      commentCount: this.commentCount,
       imageUrl: this.imageUrl,
       thumbnailUrl: this.thumbnailUrl,
       albumId: this.albumId,

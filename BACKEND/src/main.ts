@@ -12,12 +12,12 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new RequestIdInterceptor());
   app.useGlobalPipes(
-  new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-  }),
-);
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
 
   // Serve static fixture assets from public/
   app.useStaticAssets(join(__dirname, '..', 'public'));
@@ -30,6 +30,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: frontendOrigin,
+    credentials: true,
     exposedHeaders: ['X-Request-Id', 'X-Request-ID', 'x-request-id'],
   });
 

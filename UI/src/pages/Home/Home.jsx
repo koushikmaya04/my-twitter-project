@@ -1,14 +1,28 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Sidebar from '../../components/Sidebar/Sidebar.jsx';
 import Feed from '../../components/Feed/Feed.jsx';
+import Explore from '../../components/Explore/Explore.jsx';
 import RightSidebar from '../../components/RightSidebar/RightSidebar.jsx';
+import AuthModal from '../../components/AuthModal/AuthModal.jsx';
+import Notifications from '../../components/Notifications/Notifications.jsx';
+import Profile from '../../components/Profile/Profile.jsx';
 import {
   fetchPosts,
+  fetchHomeFeed,
+  fetchCurrentUser,
+  fetchUserProfile,
+  logoutUser,
   simulateLikeRequest,
-  simulateCommentRequest,
-  simulateRetweetRequest,
   createPostRequest,
+  updatePostRequest,
+  deletePostRequest,
+  followUserRequest,
+  unfollowUserRequest,
+  fetchFollowing,
+  fetchUnreadCount,
   searchPosts,
+  resolveImageUrl,
+  DEFAULT_AVATAR,
 } from '../../services/api.js';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.js';
 import { createFeedPipeline } from '../../utils/functionalPipeline.js';
@@ -18,28 +32,30 @@ import Tweet from '../../models/Tweet.js';
 import './Home.css';
 
 /**
- * CURRENT USER — Single source of truth for the authenticated/local user identity.
- */
-export const CURRENT_USER = {
-  id: 'current-user',
-  name: 'Koushik Maya',
-  handle: '@KMayaaa7841',
-  avatar: 'https://i.pravatar.cc/40?img=68',
-};
-
-/**
- * Home — Main page component that orchestrates the entire application.
+ * Home — Main page component orchestrating features JS-P0-01 through JS-P0-07.
  */
 const Home = () => {
-  // ─── Core State ───
+  // ─── Authentication & Session State (P0-01) ───
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authInitialTab, setAuthInitialTab] = useState('login');
+
+  // ─── Navigation State ───
+  const [activeNav, setActiveNav] = useState('home'); // 'home' | 'notifications' | 'profile' | 'explore'
+  const [viewingProfileId, setViewingProfileId] = useState(null);
+
+  // ─── Notification Badge State (P0-06) ───
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+
+  // ─── Core Feed State (P0-04) ───
   const [localPosts, setLocalPosts] = useState([]);
   const [apiPosts, setApiPosts] = useState([]);
-  const [searchResults, setSearchResults] = useState(null); // null when not in search mode
+  const [searchResults, setSearchResults] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [hasMore, setHasMore] = useState(true);
 
-  // ─── Canonical Request ID State ───
+  // ─── Canonical Request ID State (P0-07) ───
   const [displayedRequestId, setDisplayedRequestId] = useState(null);
   const [errorRequestId, setErrorRequestId] = useState(null);
 
@@ -47,71 +63,177 @@ const Home = () => {
   const cursorRef = useRef(null);
   const isFetchingRef = useRef(false);
 
-  // ─── UI State ───
-  const [activeTab, setActiveTab] = useState('forYou');
+  // ─── Tabs & Follow Graph State (P0-03, P0-04) ───
+  const [activeTab, setActiveTab] = useState('forYou'); // 'forYou' | 'following'
   const [searchQuery, setSearchQuery] = useState('');
-  const [followedHandles, setFollowedHandles] = useState([
-    '@alexthompson',
-    '@sarahchen',
-    '@emilypark',
-  ]);
-  const [activeNav, setActiveNav] = useState('home');
+  const [followedHandles, setFollowedHandles] = useState([]);
 
   const loadedIdsRef = useRef(new Set());
   const likeOpIdRef = useRef(new Map());
   const retweetOpIdRef = useRef(new Map());
+  const repostMapRef = useRef(new Map()); // maps targetPostId -> myRepostPostId
+
+  // Helper to load user profile details and update currentUser
+  const enrichCurrentUser = useCallback(async (baseUser) => {
+    if (!baseUser?.id) return;
+    try {
+      const { user: profileUser } = await fetchUserProfile(baseUser.id);
+      if (profileUser) {
+        const avatarUrl =
+          resolveImageUrl(profileUser.avatar?.largeUrl) ||
+          resolveImageUrl(profileUser.avatar?.smallUrl) ||
+          DEFAULT_AVATAR;
+        setCurrentUser((prev) => ({
+          ...prev,
+          name: profileUser.displayName || prev?.name || baseUser.displayName,
+          avatar: avatarUrl,
+          bio: profileUser.bio || '',
+        }));
+      }
+    } catch {
+      // Non-critical enrich
+    }
+  }, []);
+
+  // ─── Session Restoration on Mount (P0-01) ───
+  useEffect(() => {
+    let isMounted = true;
+
+    fetchCurrentUser()
+      .then(({ user, requestId }) => {
+        if (!isMounted) return;
+        if (user) {
+          const userObj = {
+            id: user.id,
+            name: user.displayName,
+            handle: user.handle?.startsWith('@') ? user.handle : `@${user.handle}`,
+            rawHandle: user.handle?.replace(/^@/, ''),
+            avatar: resolveImageUrl(user.avatar?.smallUrl) || DEFAULT_AVATAR,
+          };
+          setCurrentUser(userObj);
+
+          if (requestId) setDisplayedRequestId(requestId);
+
+          // Enrich profile avatar and details
+          enrichCurrentUser(user);
+
+          // Fetch unread count for authenticated user (P0-06)
+          fetchUnreadCount()
+            .then(({ unreadCount }) => {
+              if (isMounted) setUnreadNotificationsCount(unreadCount);
+            })
+            .catch(() => {});
+
+          // Fetch user's following list (P0-03)
+          fetchFollowing(user.id, null, 100)
+            .then(({ items }) => {
+              if (!isMounted || !items) return;
+              const handles = items.map((f) =>
+                f.handle?.startsWith('@') ? f.handle : `@${f.handle}`
+              );
+              const ids = items.map((f) => f.id).filter(Boolean);
+              setFollowedHandles([...handles, ...ids]);
+            })
+            .catch(() => {});
+        }
+      })
+      .catch((err) => {
+        // Unauthenticated session (expected for guest)
+        if (isMounted) {
+          setCurrentUser(null);
+          if (err.requestId) setDisplayedRequestId(err.requestId);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [enrichCurrentUser]);
 
   const allPosts = useMemo(() => {
     return [...localPosts, ...apiPosts];
   }, [localPosts, apiPosts]);
 
-  // ─── Fetch Posts ───
-  const loadPosts = useCallback(async () => {
-    if (isFetchingRef.current) return;
+  // ─── Fetch Feed (P0-04: Public GET /feed vs Personalized GET /feed/home) ───
+  const loadPosts = useCallback(
+    async (isReset = false) => {
+      if (isFetchingRef.current) return;
 
-    isFetchingRef.current = true;
-    setIsLoading(true);
-    setError(null);
-    setErrorRequestId(null);
+      if (!isReset && !hasMore) return;
 
-    try {
-      const {
-        posts: newPosts,
-        nextCursor,
-        hasMore: more,
-        requestId,
-      } = await fetchPosts(cursorRef.current, 10);
+      isFetchingRef.current = true;
+      setIsLoading(true);
+      setError(null);
+      setErrorRequestId(null);
 
-      if (requestId) {
-        setDisplayedRequestId(requestId);
+      const cursorToUse = isReset ? null : cursorRef.current;
+
+      try {
+        let result;
+        if (activeTab === 'following') {
+          if (!currentUser) {
+            setApiPosts([]);
+            setHasMore(false);
+            cursorRef.current = null;
+            return;
+          }
+          result = await fetchHomeFeed(cursorToUse, 10);
+        } else {
+          result = await fetchPosts(cursorToUse, 10);
+        }
+
+        const { posts, nextCursor, hasMore: more, requestId } = result;
+
+        if (requestId) {
+          setDisplayedRequestId(requestId);
+        }
+
+        if (isReset) {
+          loadedIdsRef.current.clear();
+          const uniqueNewPosts = [];
+          for (const post of posts) {
+            if (!loadedIdsRef.current.has(post.id)) {
+              loadedIdsRef.current.add(post.id);
+              uniqueNewPosts.push(post);
+            }
+          }
+          setApiPosts(uniqueNewPosts);
+        } else {
+          setApiPosts((prevPosts) => {
+            const uniqueNewPosts = [];
+            for (const post of posts) {
+              if (!loadedIdsRef.current.has(post.id)) {
+                loadedIdsRef.current.add(post.id);
+                uniqueNewPosts.push(post);
+              }
+            }
+            return [...prevPosts, ...uniqueNewPosts];
+          });
+        }
+
+        cursorRef.current = nextCursor;
+        setHasMore(more);
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        setError(err.message || 'Failed to load posts');
+        if (err.requestId) {
+          setErrorRequestId(err.requestId);
+          setDisplayedRequestId(err.requestId);
+        }
+      } finally {
+        isFetchingRef.current = false;
+        setIsLoading(false);
       }
-
-      const uniqueNewPosts = newPosts.filter((post) => {
-        if (loadedIdsRef.current.has(post.id)) return false;
-        loadedIdsRef.current.add(post.id);
-        return true;
-      });
-
-      if (uniqueNewPosts.length > 0) {
-        setApiPosts((prev) => [...prev, ...uniqueNewPosts]);
-      }
-      setHasMore(more);
-      cursorRef.current = nextCursor;
-    } catch (err) {
-      setError(err.message || 'Failed to load posts');
-      if (err.requestId) {
-        setErrorRequestId(err.requestId);
-        setDisplayedRequestId(err.requestId);
-      }
-    } finally {
-      isFetchingRef.current = false;
-      setIsLoading(false);
-    }
-  }, []);
+    },
+    [activeTab, currentUser, hasMore]
+  );
 
   useEffect(() => {
-    loadPosts();
-  }, [loadPosts]);
+    if (activeNav === 'home') {
+      cursorRef.current = null;
+      loadPosts(true);
+    }
+  }, [activeTab, activeNav, currentUser]);
 
   const { sentinelRef } = useInfiniteScroll(loadPosts, hasMore, isLoading);
 
@@ -121,7 +243,7 @@ const Home = () => {
     if (searchQuery) {
       handleSearch(searchQuery);
     } else {
-      loadPosts();
+      loadPosts(false);
     }
   }, [loadPosts, searchQuery]);
 
@@ -151,16 +273,22 @@ const Home = () => {
     );
   }, []);
 
-  // ─── Optimistic Like ───
+  // ─── Optimistic Like (P0-05) ───
   const handleLike = useCallback(
     (tweetId) => {
+      if (!currentUser) {
+        setAuthInitialTab('login');
+        setIsAuthModalOpen(true);
+        return;
+      }
+
       const previousPost = (
         searchResults !== null ? searchResults : allPosts
       ).find((p) => p.id === tweetId);
       if (!previousPost) return;
 
-      const wasLiked = previousPost.isLiked;
-      const previousLikeCount = previousPost.likeCount;
+      const wasLiked = Boolean(previousPost.isLiked);
+      const previousLikeCount = previousPost.likeCount ?? previousPost.likes ?? 0;
 
       const prevOpId = likeOpIdRef.current.get(tweetId) ?? 0;
       const myOpId = prevOpId + 1;
@@ -171,9 +299,12 @@ const Home = () => {
       updatePostById(tweetId, (post) => ({
         ...post,
         isLiked: targetDesiredState,
+        likes: targetDesiredState
+          ? (post.likes || 0) + 1
+          : Math.max(0, (post.likes || 1) - 1),
         likeCount: targetDesiredState
-          ? post.likeCount + 1
-          : Math.max(0, post.likeCount - 1),
+          ? (post.likeCount || 0) + 1
+          : Math.max(0, (post.likeCount || 1) - 1),
       }));
 
       simulateLikeRequest(tweetId, targetDesiredState)
@@ -182,21 +313,13 @@ const Home = () => {
             updatePostById(tweetId, (post) => ({
               ...post,
               isLiked: data.likedByViewer,
+              likes: data.likeCount,
               likeCount: data.likeCount,
             }));
           }
           if (data?.requestId) {
             setDisplayedRequestId(data.requestId);
           }
-
-          eventEmitter.emit('like', {
-            username: previousPost.author,
-            tweetId: tweetId,
-            tweetContent: previousPost.content,
-            message: wasLiked
-              ? `You unliked ${previousPost.author}'s post`
-              : `You liked ${previousPost.author}'s post`,
-          });
         })
         .catch((err) => {
           if (err?.requestId) {
@@ -209,26 +332,35 @@ const Home = () => {
           updatePostById(tweetId, (post) => ({
             ...post,
             isLiked: wasLiked,
+            likes: previousLikeCount,
             likeCount: previousLikeCount,
           }));
 
           eventEmitter.emit('error', {
-            message: 'Failed to like post. Action has been reverted.',
+            message: 'Failed to update like status. Reverted.',
           });
         });
     },
-    [allPosts, searchResults, updatePostById]
+    [currentUser, allPosts, searchResults, updatePostById]
   );
 
-  // ─── Comment ───
+  // ─── Comment / Reply (P0-05) ───
   const handleComment = useCallback(
     (tweetId, commentText) => {
+      if (!currentUser) {
+        setAuthInitialTab('login');
+        setIsAuthModalOpen(true);
+        return;
+      }
+
+      const tempCommentId = `comment-${Date.now()}-${Math.random()}`;
       const newComment = {
-        id: `comment-${Date.now()}-${Math.random()}`,
+        id: tempCommentId,
         text: commentText,
-        author: CURRENT_USER.name,
-        handle: CURRENT_USER.handle,
-        avatar: CURRENT_USER.avatar,
+        content: commentText,
+        author: currentUser.name,
+        handle: currentUser.handle,
+        avatar: currentUser.avatar || DEFAULT_AVATAR,
         timestamp: new Date().toISOString(),
       };
 
@@ -238,10 +370,23 @@ const Home = () => {
         commentCount: (post.commentCount || 0) + 1,
       }));
 
-      simulateCommentRequest(tweetId, commentText)
+      createPostRequest({
+        kind: 'reply',
+        replyToId: tweetId,
+        text: commentText,
+      })
         .then((data) => {
           if (data?.requestId) {
             setDisplayedRequestId(data.requestId);
+          }
+          if (data?.post) {
+            const serverReply = Tweet.fromAPIPost(data.post).toPlainObject();
+            updatePostById(tweetId, (post) => ({
+              ...post,
+              comments: (post.comments || []).map((c) =>
+                c.id === tempCommentId ? serverReply : c
+              ),
+            }));
           }
           const commentedPost = (
             searchResults !== null ? searchResults : allPosts
@@ -252,8 +397,8 @@ const Home = () => {
             tweetId,
             commentText,
             postId: tweetId,
-            commentId: newComment.id,
-            user: CURRENT_USER,
+            commentId: tempCommentId,
+            user: currentUser,
             message: `You commented on ${authorName}'s post`,
           });
         })
@@ -265,112 +410,188 @@ const Home = () => {
           updatePostById(tweetId, (post) => ({
             ...post,
             comments: (post.comments || []).filter(
-              (c) => c.id !== newComment.id
+              (c) => c.id !== tempCommentId
             ),
             commentCount: Math.max(0, (post.commentCount || 1) - 1),
           }));
           eventEmitter.emit('error', {
-            message: 'Failed to post comment. Please try again.',
+            message: 'Failed to post reply. Please try again.',
           });
         });
     },
-    [allPosts, searchResults, updatePostById]
+    [currentUser, allPosts, searchResults, updatePostById]
   );
 
-  // ─── Retweet ───
+  // ─── Retweet / Repost (P0-05: Toggle between Repost and Undo Repost) ───
   const handleRetweet = useCallback(
-    (tweetId) => {
+    async (tweetId) => {
+      if (!currentUser) {
+        setAuthInitialTab('login');
+        setIsAuthModalOpen(true);
+        return;
+      }
+
       const previousPost = (
         searchResults !== null ? searchResults : allPosts
       ).find((p) => p.id === tweetId);
       if (!previousPost) return;
 
-      const wasRetweeted = previousPost.isRetweeted;
-      const previousRetweetCount = previousPost.retweetCount;
+      const wasRetweeted = Boolean(previousPost.isRetweeted);
+      const previousRetweetCount = previousPost.retweetCount || 0;
 
       const prevOpId = retweetOpIdRef.current.get(tweetId) ?? 0;
       const myOpId = prevOpId + 1;
       retweetOpIdRef.current.set(tweetId, myOpId);
 
+      // Optimistic update
       updatePostById(tweetId, (post) => ({
         ...post,
-        isRetweeted: !post.isRetweeted,
-        retweetCount: !post.isRetweeted
-          ? post.retweetCount + 1
-          : Math.max(0, post.retweetCount - 1),
+        isRetweeted: !wasRetweeted,
+        retweetCount: !wasRetweeted
+          ? (post.retweetCount || 0) + 1
+          : Math.max(0, (post.retweetCount || 1) - 1),
       }));
 
-      simulateRetweetRequest(tweetId)
-        .then((data) => {
-          if (data?.requestId) {
-            setDisplayedRequestId(data.requestId);
-          }
-          if (!wasRetweeted && previousPost) {
-            const retweet = Retweet.fromTweet(
-              previousPost,
-              CURRENT_USER.name,
-              CURRENT_USER.handle
+      try {
+        if (wasRetweeted) {
+          // Undo Repost: delete the user's repost post
+          let repostId = repostMapRef.current.get(tweetId);
+          if (!repostId) {
+            const foundRepost = allPosts.find(
+              (p) =>
+                p.kind === 'repost' &&
+                (p.repostOfId === tweetId || p.id === tweetId) &&
+                p.authorId === currentUser.id
             );
-            console.log('Retweet model instance:', retweet.toPlainObject());
+            repostId = foundRepost?.id;
           }
 
-          eventEmitter.emit('retweet', {
-            username: previousPost.author,
-            tweetId,
-            tweetContent: previousPost.content,
-            message: wasRetweeted
-              ? `You removed your repost of ${previousPost.author}'s post`
-              : `You reposted ${previousPost.author}'s post`,
-          });
-        })
-        .catch((err) => {
-          if (err?.requestId) {
-            setErrorRequestId(err.requestId);
-            setDisplayedRequestId(err.requestId);
+          if (repostId) {
+            await deletePostRequest(repostId);
+            repostMapRef.current.delete(tweetId);
+            setLocalPosts((prev) => prev.filter((p) => p.id !== repostId));
+            setApiPosts((prev) => prev.filter((p) => p.id !== repostId));
           }
-          if (retweetOpIdRef.current.get(tweetId) !== myOpId) {
-            return;
-          }
-          updatePostById(tweetId, (post) => ({
-            ...post,
-            isRetweeted: wasRetweeted,
-            retweetCount: previousRetweetCount,
-          }));
-          eventEmitter.emit('error', {
-            message: 'Failed to repost. Action has been reverted.',
+        } else {
+          // Create Repost
+          const result = await createPostRequest({
+            kind: 'repost',
+            repostOfId: tweetId,
           });
+
+          if (result?.post?.id) {
+            repostMapRef.current.set(tweetId, result.post.id);
+          }
+          if (result?.requestId) {
+            setDisplayedRequestId(result.requestId);
+          }
+        }
+      } catch (err) {
+        if (err?.requestId) {
+          setErrorRequestId(err.requestId);
+          setDisplayedRequestId(err.requestId);
+        }
+        if (retweetOpIdRef.current.get(tweetId) !== myOpId) {
+          return;
+        }
+        // Rollback
+        updatePostById(tweetId, (post) => ({
+          ...post,
+          isRetweeted: wasRetweeted,
+          retweetCount: previousRetweetCount,
+        }));
+        eventEmitter.emit('error', {
+          message: 'Failed to update repost state. Action reverted.',
         });
+      }
     },
-    [allPosts, searchResults, updatePostById]
+    [currentUser, allPosts, searchResults, updatePostById]
   );
 
-  // ─── Follow ───
+  // ─── Real Follow / Unfollow (P0-03) ───
   const handleFollow = useCallback(
-    (handle, authorName) => {
-      if (handle === CURRENT_USER.handle) {
+    async (targetUserIdOrHandle, authorName) => {
+      if (!currentUser) {
+        setAuthInitialTab('login');
+        setIsAuthModalOpen(true);
+        return;
+      }
+
+      // Check if target is a UUID
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        String(targetUserIdOrHandle)
+      );
+
+      let targetUuid = isUuid ? targetUserIdOrHandle : null;
+      const cleanHandle = String(targetUserIdOrHandle).replace(/^@/, '');
+
+      if (!targetUuid) {
+        const matched = allPosts.find(
+          (p) =>
+            p.handle === cleanHandle ||
+            p.handle === `@${cleanHandle}` ||
+            p.author === authorName
+        );
+        targetUuid = matched?.authorId || null;
+      }
+
+      if (targetUuid === currentUser.id || cleanHandle === currentUser.rawHandle) {
         console.warn('Cannot follow yourself');
         return;
       }
 
-      const isUnfollowing = followedHandles.includes(handle);
+      const isUnfollowing =
+        (targetUuid && followedHandles.includes(targetUuid)) ||
+        followedHandles.includes(cleanHandle) ||
+        followedHandles.includes(`@${cleanHandle}`);
 
-      eventEmitter.emit('newFollower', {
-        message: isUnfollowing
-          ? `You unfollowed ${authorName}`
-          : `You followed ${authorName}`,
-      });
-
+      // Optimistic update
       setFollowedHandles((prev) => {
-        if (prev.includes(handle)) {
-          return prev.filter((h) => h !== handle);
+        if (isUnfollowing) {
+          return prev.filter(
+            (h) =>
+              h !== cleanHandle &&
+              h !== `@${cleanHandle}` &&
+              h !== targetUuid
+          );
         }
-        return [...prev, handle];
+        const toAdd = [`@${cleanHandle}`];
+        if (targetUuid) toAdd.push(targetUuid);
+        return [...prev, ...toAdd];
       });
+
+      try {
+        if (targetUuid) {
+          if (isUnfollowing) {
+            await unfollowUserRequest(targetUuid);
+          } else {
+            await followUserRequest(targetUuid);
+          }
+        }
+      } catch (err) {
+        // Rollback on failure
+        setFollowedHandles((prev) => {
+          if (isUnfollowing) {
+            const toAdd = [`@${cleanHandle}`];
+            if (targetUuid) toAdd.push(targetUuid);
+            return [...prev, ...toAdd];
+          }
+          return prev.filter(
+            (h) =>
+              h !== cleanHandle &&
+              h !== `@${cleanHandle}` &&
+              h !== targetUuid
+          );
+        });
+        eventEmitter.emit('error', {
+          message: `Failed to update follow status: ${err.message}`,
+        });
+      }
     },
-    [followedHandles]
+    [currentUser, followedHandles, allPosts]
   );
 
-  // ─── New Tweet ───
+  // ─── Post Lifecycle: Create (P0-05) ───
   const handleNewPost = useCallback(async (text) => {
     try {
       const createdPost = await createPostRequest({
@@ -396,12 +617,66 @@ const Home = () => {
     }
   }, []);
 
+  // ─── Post Lifecycle: Edit Post (P0-05: 30-min window & expectedVersion) ───
+  const handleEditPost = useCallback(
+    async (postId, newText, expectedVersion) => {
+      const { post: updatedRecord, requestId } = await updatePostRequest(
+        postId,
+        newText,
+        expectedVersion
+      );
+
+      if (requestId) {
+        setDisplayedRequestId(requestId);
+      }
+
+      updatePostById(postId, (post) => ({
+        ...post,
+        content: newText,
+        version: (post.version || 1) + 1,
+        isEdited: true,
+        editedAt: new Date().toISOString(),
+      }));
+
+      eventEmitter.emit('like', {
+        message: 'Post updated successfully',
+      });
+    },
+    [updatePostById]
+  );
+
+  // ─── Post Lifecycle: Delete Post (P0-05: Soft delete) ───
+  const handleDeletePost = useCallback(
+    async (postId) => {
+      try {
+        const { requestId } = await deletePostRequest(postId);
+        if (requestId) {
+          setDisplayedRequestId(requestId);
+        }
+
+        setLocalPosts((prev) => prev.filter((p) => p.id !== postId));
+        setApiPosts((prev) => prev.filter((p) => p.id !== postId));
+        setSearchResults((prev) =>
+          prev ? prev.filter((p) => p.id !== postId) : null
+        );
+
+        eventEmitter.emit('like', {
+          message: 'Post deleted successfully',
+        });
+      } catch (err) {
+        eventEmitter.emit('error', {
+          message: err.message || 'Failed to delete post',
+        });
+      }
+    },
+    []
+  );
+
   // ─── Backend Search ───
   const handleSearch = useCallback(async (query) => {
     const trimmed = typeof query === 'string' ? query.trim() : '';
     setSearchQuery(trimmed);
 
-    // Empty or cleared query restores original feed
     if (!trimmed) {
       setSearchResults(null);
       setError(null);
@@ -409,8 +684,6 @@ const Home = () => {
       return;
     }
 
-    // Backend validates query between 2 and 80 characters.
-    // Do not send malformed queries (< 2 chars).
     if (trimmed.length < 2) {
       setSearchResults([]);
       return;
@@ -438,36 +711,203 @@ const Home = () => {
     }
   }, []);
 
-  // ─── Tab Change ───
-  const handleTabChange = useCallback((tab) => {
-    setActiveTab(tab);
+  // ─── Navigation Handlers ───
+  const handleNavigate = useCallback(
+    (navId) => {
+      if (navId === 'compose') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+
+      if (navId === 'profile') {
+        if (!currentUser) {
+          setAuthInitialTab('login');
+          setIsAuthModalOpen(true);
+          return;
+        }
+        setViewingProfileId(currentUser.id);
+        setActiveNav('profile');
+        return;
+      }
+
+      if (navId === 'notifications') {
+        if (!currentUser) {
+          setAuthInitialTab('login');
+          setIsAuthModalOpen(true);
+          return;
+        }
+        setActiveNav('notifications');
+        return;
+      }
+
+      setActiveNav(navId);
+      setSearchResults(null);
+      setSearchQuery('');
+    },
+    [currentUser]
+  );
+
+  const handleViewUserProfile = useCallback((targetUserId) => {
+    setViewingProfileId(targetUserId);
+    setActiveNav('profile');
+  }, []);
+
+  // ─── Auth Handlers (P0-01) ───
+  const handleAuthSuccess = useCallback((user) => {
+    const userObj = {
+      id: user.id,
+      name: user.displayName,
+      handle: user.handle?.startsWith('@') ? user.handle : `@${user.handle}`,
+      rawHandle: user.handle?.replace(/^@/, ''),
+      avatar: resolveImageUrl(user.avatar?.smallUrl) || DEFAULT_AVATAR,
+    };
+    setCurrentUser(userObj);
+
+    enrichCurrentUser(user);
+
+    fetchUnreadCount()
+      .then(({ unreadCount }) => setUnreadNotificationsCount(unreadCount))
+      .catch(() => {});
+
+    fetchFollowing(user.id, null, 100)
+      .then(({ items }) => {
+        if (!items) return;
+        const handles = items.map((f) =>
+          f.handle?.startsWith('@') ? f.handle : `@${f.handle}`
+        );
+        const ids = items.map((f) => f.id).filter(Boolean);
+        setFollowedHandles([...handles, ...ids]);
+      })
+      .catch(() => {});
+  }, [enrichCurrentUser]);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await logoutUser();
+    } catch {
+      // Clear local session state regardless
+    }
+    setCurrentUser(null);
+    setFollowedHandles([]);
+    setUnreadNotificationsCount(0);
+    setActiveNav('home');
+    cursorRef.current = null;
+    loadPosts(true);
+  }, [loadPosts]);
+
+  const handleUpdateCurrentUser = useCallback((updates) => {
+    setCurrentUser((prev) => ({
+      ...prev,
+      ...updates,
+    }));
   }, []);
 
   return (
-    <div className="home">
-      <Sidebar onNavigate={setActiveNav} activeItem={activeNav} />
-      <Feed
-        posts={displayedPosts}
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-        onPost={handleNewPost}
-        onLike={handleLike}
-        onRetweet={handleRetweet}
-        onComment={handleComment}
-        onFollow={handleFollow}
-        followedHandles={followedHandles}
-        currentUser={CURRENT_USER}
-        isLoading={isLoading}
-        error={error}
-        errorRequestId={errorRequestId}
-        displayedRequestId={displayedRequestId}
-        onRequestIdUpdate={setDisplayedRequestId}
-        onRetry={handleRetry}
-        hasMore={searchResults !== null ? false : hasMore}
-        sentinelRef={sentinelRef}
-        searchQuery={searchQuery}
+    <div className="home-layout home">
+      {/* Sidebar: Navigation & Identity (P0-01, P0-06) */}
+      <Sidebar
+        onNavigate={handleNavigate}
+        activeItem={activeNav}
+        currentUser={currentUser}
+        unreadCount={unreadNotificationsCount}
+        onOpenAuth={() => {
+          setAuthInitialTab('login');
+          setIsAuthModalOpen(true);
+        }}
+        onLogout={handleLogout}
       />
+
+      {/* Main Content Router */}
+      {activeNav === 'home' && (
+        <Feed
+          posts={displayedPosts}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onPost={handleNewPost}
+          onLike={handleLike}
+          onRetweet={handleRetweet}
+          onComment={handleComment}
+          onFollow={handleFollow}
+          onEdit={handleEditPost}
+          onDelete={handleDeletePost}
+          onViewUserProfile={handleViewUserProfile}
+          followedHandles={followedHandles}
+          currentUser={currentUser}
+          isLoading={isLoading}
+          error={error}
+          errorRequestId={errorRequestId}
+          displayedRequestId={displayedRequestId}
+          onRequestIdUpdate={setDisplayedRequestId}
+          onRetry={handleRetry}
+          hasMore={searchResults !== null ? false : hasMore}
+          sentinelRef={sentinelRef}
+          searchQuery={searchQuery}
+          onOpenAuth={() => {
+            setAuthInitialTab('login');
+            setIsAuthModalOpen(true);
+          }}
+        />
+      )}
+
+      {activeNav === 'explore' && (
+        <Explore
+          posts={allPosts}
+          onLike={handleLike}
+          onRetweet={handleRetweet}
+          onComment={handleComment}
+          onFollow={handleFollow}
+          onEdit={handleEditPost}
+          onDelete={handleDeletePost}
+          onViewUserProfile={handleViewUserProfile}
+          followedHandles={followedHandles}
+          currentUser={currentUser}
+          onOpenAuth={() => {
+            setAuthInitialTab('login');
+            setIsAuthModalOpen(true);
+          }}
+        />
+      )}
+
+      {activeNav === 'notifications' && (
+        <Notifications
+          currentUser={currentUser}
+          onUnreadCountChange={setUnreadNotificationsCount}
+        />
+      )}
+
+      {activeNav === 'profile' && (
+        <Profile
+          userId={viewingProfileId || currentUser?.id}
+          currentUser={currentUser}
+          posts={allPosts}
+          onLike={handleLike}
+          onRetweet={handleRetweet}
+          onComment={handleComment}
+          onFollow={handleFollow}
+          onEdit={handleEditPost}
+          onDelete={handleDeletePost}
+          followedHandles={followedHandles}
+          onOpenAuth={() => {
+            setAuthInitialTab('login');
+            setIsAuthModalOpen(true);
+          }}
+          onBack={() => setActiveNav('home')}
+          onLogout={handleLogout}
+          onUpdateCurrentUser={handleUpdateCurrentUser}
+          onViewUserProfile={handleViewUserProfile}
+        />
+      )}
+
+      {/* Right Column: Search, Premium Card, and Trending */}
       <RightSidebar onSearch={handleSearch} />
+
+      {/* Authentication Modal Dialog (P0-01) */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
+        initialTab={authInitialTab}
+      />
     </div>
   );
 };

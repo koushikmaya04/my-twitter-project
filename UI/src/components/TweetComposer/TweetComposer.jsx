@@ -1,21 +1,28 @@
 import React, { useState, useCallback } from 'react';
+import { resolveImageUrl } from '../../services/api.js';
+import { DEFAULT_AVATAR } from '../../utils/constants.js';
 import './TweetComposer.css';
 
 /**
  * TweetComposer — "What's happening?" compose area at top of feed.
- * Allows users to compose new tweets and add them to the feed.
+ * Allows authenticated users to compose new tweets and post to the timeline.
  */
-const TweetComposer = ({ onPost }) => {
+const TweetComposer = ({ onPost, currentUser, onOpenAuth }) => {
   const [text, setText] = useState('');
   const [isFocused, setIsFocused] = useState(false);
 
   const handleSubmit = useCallback(() => {
+    if (!currentUser) {
+      onOpenAuth?.();
+      return;
+    }
+
     if (text.trim()) {
       onPost?.(text.trim());
       setText('');
       setIsFocused(false);
     }
-  }, [text, onPost]);
+  }, [text, onPost, currentUser, onOpenAuth]);
 
   const handleKeyDown = useCallback(
     (e) => {
@@ -35,21 +42,39 @@ const TweetComposer = ({ onPost }) => {
     { id: 'location', path: 'M12 7c-1.93 0-3.5 1.57-3.5 3.5S10.07 14 12 14s3.5-1.57 3.5-3.5S13.93 7 12 7zm0 5c-.83 0-1.5-.67-1.5-1.5S11.17 9 12 9s1.5.67 1.5 1.5S12.83 12 12 12zm-.01-10c-4.76 0-8.54 3.97-8.24 8.86.25 4.07 3.29 7.5 7.37 8.43.35.08.72.08 1.07 0 4.09-.93 7.12-4.36 7.37-8.43.3-4.89-3.48-8.86-8.24-8.86h-.33zm6.24 8.73c-.2 3.28-2.66 6.05-5.93 6.8-.18.04-.37.04-.55 0-3.27-.75-5.73-3.52-5.93-6.8-.24-3.94 2.8-7.13 6.62-7.13h.27c3.82 0 6.86 3.19 6.62 7.13h-.1z' },
   ];
 
+  const avatarSrc = currentUser
+    ? resolveImageUrl(currentUser.avatar?.smallUrl || currentUser.avatar) ||
+      DEFAULT_AVATAR
+    : DEFAULT_AVATAR;
+
   return (
     <div className={`tweet-composer ${isFocused ? 'tweet-composer--focused' : ''}`}>
       <div className="tweet-composer__inner">
         <img
           className="tweet-composer__avatar"
-          src="https://i.pravatar.cc/40?img=68"
-          alt="Your avatar"
+          src={avatarSrc}
+          alt=""
+          onError={(e) => {
+            e.currentTarget.onerror = null;
+            e.currentTarget.src = DEFAULT_AVATAR;
+          }}
         />
         <div className="tweet-composer__input-area">
           <textarea
             className="tweet-composer__textarea"
-            placeholder="What's happening?"
+            placeholder={currentUser ? "What's happening?" : "Sign in to post your thoughts"}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onFocus={() => setIsFocused(true)}
+            onFocus={() => {
+              if (!currentUser) {
+                onOpenAuth?.();
+              } else {
+                setIsFocused(true);
+              }
+            }}
+            onClick={() => {
+              if (!currentUser) onOpenAuth?.();
+            }}
             onKeyDown={handleKeyDown}
             rows={isFocused ? 3 : 1}
           />
@@ -64,9 +89,9 @@ const TweetComposer = ({ onPost }) => {
               ))}
             </div>
             <button
-              className="tweet-composer__post-btn"
-              onClick={handleSubmit}
+              className="tweet-composer__submit-btn"
               disabled={!text.trim()}
+              onClick={handleSubmit}
             >
               Post
             </button>

@@ -7,13 +7,11 @@ import './Feed.css';
 
 /**
  * Feed — Center column containing tabs, tweet composer, and the tweet list.
- *
- * Receives already-processed (piped) posts from Home or search results.
- * Renders TweetCards, loading skeletons, error state, and the
- * infinite-scroll sentinel element.
- *
- * Displays the canonical Request ID in the header and in error states
- * to guarantee 1:1 match with response headers.
+ * Supports:
+ * - Public feed ("For you") and Personalized feed ("Following").
+ * - Cursor pagination with sentinel element.
+ * - Intentional empty feed state for Following feed (P0-04).
+ * - Full post lifecycle: create, edit (30-min window), delete, like, reply, repost.
  */
 const Feed = ({
   posts,
@@ -24,7 +22,10 @@ const Feed = ({
   onRetweet,
   onComment,
   onFollow,
-  followedHandles,
+  onEdit,
+  onDelete,
+  onViewUserProfile,
+  followedHandles = [],
   currentUser,
   isLoading,
   error,
@@ -35,6 +36,7 @@ const Feed = ({
   hasMore,
   sentinelRef,
   searchQuery,
+  onOpenAuth,
 }) => {
   return (
     <main className="feed" role="main" aria-label="Tweet feed">
@@ -60,34 +62,12 @@ const Feed = ({
         </button>
       </div>
 
-      {/* Canonical Request ID Display Badge */}
-      {displayedRequestId && (
-        <div
-          className="feed__request-id-badge"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '6px 16px',
-            fontSize: '12px',
-            color: 'var(--text-secondary)',
-            backgroundColor: 'rgba(29, 155, 240, 0.05)',
-            borderBottom: '1px solid var(--border-color)',
-            fontFamily: 'monospace',
-          }}
-        >
-          <span>X-Request-ID:</span>
-          <span
-            data-testid="displayed-request-id"
-            style={{ fontWeight: 600, color: 'var(--text-primary)' }}
-          >
-            {displayedRequestId}
-          </span>
-        </div>
-      )}
-
       {/* Tweet Composer */}
-      <TweetComposer onPost={onPost} />
+      <TweetComposer
+        onPost={onPost}
+        currentUser={currentUser}
+        onOpenAuth={onOpenAuth}
+      />
 
       {/* Search "No Results" state */}
       {searchQuery && posts.length === 0 && !isLoading && !error && (
@@ -97,21 +77,69 @@ const Feed = ({
         </div>
       )}
 
+      {/* Empty Following Feed State (P0-04 Decision: Intentional empty/onboarding state) */}
+      {!searchQuery && activeTab === 'following' && posts.length === 0 && !isLoading && !error && (
+        <div
+          className="feed__empty-onboarding"
+          role="status"
+          style={{
+            padding: '40px 24px',
+            textAlign: 'center',
+            borderBottom: '1px solid var(--border-color)',
+          }}
+        >
+          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, color: 'var(--text-primary)' }}>
+            Welcome to your Following timeline!
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 15, maxWidth: 420, margin: '0 auto 16px', lineHeight: 1.5 }}>
+            {currentUser
+              ? "Follow accounts and authors you are interested in or post your own thoughts to see them here."
+              : "Sign in to see tweets from the accounts you follow."}
+          </p>
+          {!currentUser && (
+            <button
+              onClick={onOpenAuth}
+              style={{
+                backgroundColor: 'var(--accent-blue)',
+                color: '#fff',
+                padding: '8px 20px',
+                borderRadius: 9999,
+                fontWeight: 700,
+                fontSize: 14,
+              }}
+            >
+              Sign in
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Tweet List */}
       <div className="feed__list" role="feed" aria-label="Tweets">
-        {posts.map((tweet) => (
-          <TweetCard
-            key={tweet.id}
-            tweet={tweet}
-            onLike={onLike}
-            onRetweet={onRetweet}
-            onComment={onComment}
-            onFollow={onFollow}
-            isFollowing={followedHandles.includes(tweet.handle)}
-            currentUser={currentUser}
-            onRequestIdUpdate={onRequestIdUpdate}
-          />
-        ))}
+        {posts.map((tweet) => {
+          const isFollowingThisTweet =
+            followedHandles.includes(tweet.handle) ||
+            followedHandles.includes(tweet.handle?.replace(/^@/, '')) ||
+            (tweet.authorId && followedHandles.includes(tweet.authorId));
+
+          return (
+            <TweetCard
+              key={tweet.id}
+              tweet={tweet}
+              onLike={onLike}
+              onRetweet={onRetweet}
+              onComment={onComment}
+              onFollow={onFollow}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onViewUserProfile={onViewUserProfile}
+              isFollowing={isFollowingThisTweet}
+              currentUser={currentUser}
+              onRequestIdUpdate={onRequestIdUpdate}
+              onOpenAuth={onOpenAuth}
+            />
+          );
+        })}
       </div>
 
       {/* Loading Skeleton */}

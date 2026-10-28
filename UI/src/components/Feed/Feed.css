@@ -1,8 +1,7 @@
 .feed {
-  flex: 1;
   min-width: 0;
+  width: 100%;
   max-width: 600px;
-  border-left: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
 }
 

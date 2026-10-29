@@ -39,13 +39,13 @@ export class AuthController {
   ) {
     const result = await this.authService.login(body);
 
-    response.cookie('session', result.token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+   response.cookie('session', result.token, {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+  path: '/',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+});
 
     return { item: result.item };
   }

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import TweetActions from '../TweetActions/TweetActions.jsx';
 import CommentSection from '../CommentSection/CommentSection.jsx';
 import ImageModal from '../ImageModal/ImageModal.jsx';
@@ -108,6 +108,7 @@ const TweetCard = memo(
 
     const handleCloseImage = useCallback(() => {
       setIsImageOpen(false);
+      setDetailTweet(null);
     }, []);
 
     const handleImageError = useCallback(() => {
@@ -157,7 +158,17 @@ const TweetCard = memo(
       }
     };
 
-    const activeTweet = detailTweet || tweet;
+    const activeTweet = useMemo(() => {
+      if (!detailTweet) return tweet;
+      return {
+        ...detailTweet,
+        isLiked: tweet.isLiked,
+        likeCount: tweet.likeCount ?? tweet.likes,
+        likes: tweet.likes ?? tweet.likeCount,
+        isRetweeted: tweet.isRetweeted,
+        retweetCount: tweet.retweetCount,
+      };
+    }, [detailTweet, tweet]);
 
     const formatTimestamp = (raw) => {
       if (!raw) return '';

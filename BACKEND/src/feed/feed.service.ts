@@ -22,8 +22,9 @@ export class FeedService {
   async getFeed(
     cursor: string | null,
     limit: number,
+    viewerId: string | null = null,
   ): Promise<FeedResponseDto> {
-    const result = await this.repository.listOriginalFeed(cursor, limit, null);
+    const result = await this.repository.listOriginalFeed(cursor, limit, viewerId);
     return mapPaginatedPosts(result);
   }
 

@@ -99,6 +99,7 @@ class Post {
       handle: this.handle,
       avatar: this.avatar,
       timestamp: this.timestamp,
+      likes: this.#likeCount,
       likeCount: this.#likeCount,
       comments: [...this.#comments],
       commentCount: this.#comments.length,

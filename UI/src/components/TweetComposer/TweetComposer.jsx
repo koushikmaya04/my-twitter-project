@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
 import { resolveImageUrl } from '../../services/api.js';
 import { DEFAULT_AVATAR } from '../../utils/constants.js';
 import './TweetComposer.css';
@@ -6,10 +6,25 @@ import './TweetComposer.css';
 /**
  * TweetComposer — "What's happening?" compose area at top of feed.
  * Allows authenticated users to compose new tweets and post to the timeline.
+ *
+ * Fix #2: Exposes a `focusInput()` method via forwardRef so that the sidebar
+ * Post button can programmatically focus the textarea without duplicating any
+ * post-creation logic.
  */
-const TweetComposer = ({ onPost, currentUser, onOpenAuth }) => {
+const TweetComposer = forwardRef(function TweetComposer({ onPost, currentUser, onOpenAuth }, ref) {
   const [text, setText] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const textareaRef = useRef(null);
+
+  // Expose focusInput() to parent components via ref
+  useImperativeHandle(ref, () => ({
+    focusInput() {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        setIsFocused(true);
+      }
+    },
+  }));
 
   const handleSubmit = useCallback(() => {
     if (!currentUser) {
@@ -61,6 +76,7 @@ const TweetComposer = ({ onPost, currentUser, onOpenAuth }) => {
         />
         <div className="tweet-composer__input-area">
           <textarea
+            ref={textareaRef}
             className="tweet-composer__textarea"
             placeholder={currentUser ? "What's happening?" : "Sign in to post your thoughts"}
             value={text}
@@ -100,6 +116,6 @@ const TweetComposer = ({ onPost, currentUser, onOpenAuth }) => {
       </div>
     </div>
   );
-};
+});
 
 export default TweetComposer;

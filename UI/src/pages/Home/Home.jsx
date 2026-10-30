@@ -43,6 +43,8 @@ const Home = () => {
   // ─── Navigation State ───
   const [activeNav, setActiveNav] = useState('home'); // 'home' | 'notifications' | 'profile' | 'explore'
   const [viewingProfileId, setViewingProfileId] = useState(null);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+  const composerRef = useRef(null);
 
   // ─── Notification Badge State (P0-06) ───
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
@@ -72,6 +74,25 @@ const Home = () => {
   const likeOpIdRef = useRef(new Map());
   const retweetOpIdRef = useRef(new Map());
   const repostMapRef = useRef(new Map()); // maps targetPostId -> myRepostPostId
+
+  // Fix #6: Mobile drawer accessibility — background scroll lock and Escape to close
+  useEffect(() => {
+    if (!isMobileDrawerOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsMobileDrawerOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isMobileDrawerOpen]);
 
   // Helper to load user profile details and update currentUser
   const enrichCurrentUser = useCallback(async (baseUser) => {
@@ -124,15 +145,20 @@ const Home = () => {
             })
             .catch(() => {});
 
-          // Fetch user's following list (P0-03)
-          fetchFollowing(user.id, null, 100)
+          // Fetch user's following list (P0-03 & Fix #4: max limit is 50)
+          fetchFollowing(user.id, null, 50)
             .then(({ items }) => {
               if (!isMounted || !items) return;
-              const handles = items.map((f) =>
-                f.handle?.startsWith('@') ? f.handle : `@${f.handle}`
-              );
-              const ids = items.map((f) => f.id).filter(Boolean);
-              setFollowedHandles([...handles, ...ids]);
+              const normalized = [];
+              items.forEach((f) => {
+                if (f.id) normalized.push(f.id);
+                if (f.handle) {
+                  const clean = f.handle.replace(/^@/, '');
+                  normalized.push(clean);
+                  normalized.push(`@${clean}`);
+                }
+              });
+              setFollowedHandles(normalized);
             })
             .catch(() => {});
         }
@@ -508,7 +534,7 @@ const Home = () => {
     [currentUser, allPosts, searchResults, updatePostById]
   );
 
-  // ─── Real Follow / Unfollow (P0-03) ───
+  // ─── Real Follow / Unfollow (P0-03 & Fix #4) ───
   const handleFollow = useCallback(
     async (targetUserIdOrHandle, authorName) => {
       if (!currentUser) {
@@ -522,17 +548,22 @@ const Home = () => {
         String(targetUserIdOrHandle)
       );
 
-      let targetUuid = isUuid ? targetUserIdOrHandle : null;
-      const cleanHandle = String(targetUserIdOrHandle).replace(/^@/, '');
+      let targetUuid = isUuid ? String(targetUserIdOrHandle) : null;
+      let cleanHandle = isUuid ? '' : String(targetUserIdOrHandle).replace(/^@/, '');
 
-      if (!targetUuid) {
+      if (!targetUuid || !cleanHandle) {
         const matched = allPosts.find(
           (p) =>
-            p.handle === cleanHandle ||
-            p.handle === `@${cleanHandle}` ||
-            p.author === authorName
+            (targetUuid && p.authorId === targetUuid) ||
+            (cleanHandle && (p.handle === cleanHandle || p.handle === `@${cleanHandle}`)) ||
+            (authorName && p.author === authorName)
         );
-        targetUuid = matched?.authorId || null;
+        if (matched) {
+          if (!targetUuid && matched.authorId) targetUuid = matched.authorId;
+          if (!cleanHandle && matched.handle) {
+            cleanHandle = matched.handle.replace(/^@/, '');
+          }
+        }
       }
 
       if (targetUuid === currentUser.id || cleanHandle === currentUser.rawHandle) {
@@ -542,8 +573,7 @@ const Home = () => {
 
       const isUnfollowing =
         (targetUuid && followedHandles.includes(targetUuid)) ||
-        followedHandles.includes(cleanHandle) ||
-        followedHandles.includes(`@${cleanHandle}`);
+        (cleanHandle && (followedHandles.includes(cleanHandle) || followedHandles.includes(`@${cleanHandle}`)));
 
       // Optimistic update
       setFollowedHandles((prev) => {
@@ -555,7 +585,10 @@ const Home = () => {
               h !== targetUuid
           );
         }
-        const toAdd = [`@${cleanHandle}`];
+        const toAdd = [];
+        if (cleanHandle) {
+          toAdd.push(cleanHandle, `@${cleanHandle}`);
+        }
         if (targetUuid) toAdd.push(targetUuid);
         return [...prev, ...toAdd];
       });
@@ -572,7 +605,10 @@ const Home = () => {
         // Rollback on failure
         setFollowedHandles((prev) => {
           if (isUnfollowing) {
-            const toAdd = [`@${cleanHandle}`];
+            const toAdd = [];
+            if (cleanHandle) {
+              toAdd.push(cleanHandle, `@${cleanHandle}`);
+            }
             if (targetUuid) toAdd.push(targetUuid);
             return [...prev, ...toAdd];
           }
@@ -711,11 +747,28 @@ const Home = () => {
     }
   }, []);
 
-  // ─── Navigation Handlers ───
+  // ─── Navigation Handlers (Fix #2 & Fix #6) ───
   const handleNavigate = useCallback(
     (navId) => {
+      setIsMobileDrawerOpen(false);
+
       if (navId === 'compose') {
+        if (!currentUser) {
+          setAuthInitialTab('login');
+          setIsAuthModalOpen(true);
+          return;
+        }
+
         window.scrollTo({ top: 0, behavior: 'smooth' });
+
+        if (activeNav !== 'home') {
+          setActiveNav('home');
+          setTimeout(() => {
+            composerRef.current?.focusInput();
+          }, 50);
+        } else {
+          composerRef.current?.focusInput();
+        }
         return;
       }
 
@@ -744,7 +797,7 @@ const Home = () => {
       setSearchResults(null);
       setSearchQuery('');
     },
-    [currentUser]
+    [currentUser, activeNav]
   );
 
   const handleViewUserProfile = useCallback((targetUserId) => {
@@ -769,14 +822,20 @@ const Home = () => {
       .then(({ unreadCount }) => setUnreadNotificationsCount(unreadCount))
       .catch(() => {});
 
-    fetchFollowing(user.id, null, 100)
+    // Fix #4: max limit is 50; store both handles and IDs
+    fetchFollowing(user.id, null, 50)
       .then(({ items }) => {
         if (!items) return;
-        const handles = items.map((f) =>
-          f.handle?.startsWith('@') ? f.handle : `@${f.handle}`
-        );
-        const ids = items.map((f) => f.id).filter(Boolean);
-        setFollowedHandles([...handles, ...ids]);
+        const normalized = [];
+        items.forEach((f) => {
+          if (f.id) normalized.push(f.id);
+          if (f.handle) {
+            const clean = f.handle.replace(/^@/, '');
+            normalized.push(clean);
+            normalized.push(`@${clean}`);
+          }
+        });
+        setFollowedHandles(normalized);
       })
       .catch(() => {});
   }, [enrichCurrentUser]);
@@ -804,7 +863,35 @@ const Home = () => {
 
   return (
     <div className="home-layout home">
-      {/* Sidebar: Navigation & Identity (P0-01, P0-06) */}
+      {/* Mobile Top Navigation Header (Fix #6) */}
+      <header className="mobile-header">
+        <button
+          className="mobile-header__hamburger"
+          onClick={() => setIsMobileDrawerOpen(true)}
+          aria-label="Open navigation menu"
+        >
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+            <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z" />
+          </svg>
+        </button>
+        <div className="mobile-header__logo">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+        </div>
+        <div className="mobile-header__spacer" />
+      </header>
+
+      {/* Mobile Drawer Dark Backdrop Overlay (Fix #6) */}
+      {isMobileDrawerOpen && (
+        <div
+          className="sidebar-mobile-overlay"
+          onClick={() => setIsMobileDrawerOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar: Navigation & Identity (P0-01, P0-06, Fix #2, Fix #6) */}
       <Sidebar
         onNavigate={handleNavigate}
         activeItem={activeNav}
@@ -815,6 +902,8 @@ const Home = () => {
           setIsAuthModalOpen(true);
         }}
         onLogout={handleLogout}
+        isMobileOpen={isMobileDrawerOpen}
+        onCloseMobile={() => setIsMobileDrawerOpen(false)}
       />
 
       {/* Main Content Router */}
@@ -846,6 +935,7 @@ const Home = () => {
             setAuthInitialTab('login');
             setIsAuthModalOpen(true);
           }}
+          composerRef={composerRef}
         />
       )}
 

@@ -12,6 +12,9 @@ import './Feed.css';
  * - Cursor pagination with sentinel element.
  * - Intentional empty feed state for Following feed (P0-04).
  * - Full post lifecycle: create, edit (30-min window), delete, like, reply, repost.
+ *
+ * Fix #2: accepts composerRef which is forwarded to TweetComposer so the
+ * sidebar Post button can call composerRef.current.focusInput().
  */
 const Feed = ({
   posts,
@@ -37,6 +40,7 @@ const Feed = ({
   sentinelRef,
   searchQuery,
   onOpenAuth,
+  composerRef,
 }) => {
   return (
     <main className="feed" role="main" aria-label="Tweet feed">
@@ -62,8 +66,9 @@ const Feed = ({
         </button>
       </div>
 
-      {/* Tweet Composer */}
+      {/* Tweet Composer — ref forwarded for Fix #2 (sidebar Post button focus) */}
       <TweetComposer
+        ref={composerRef}
         onPost={onPost}
         currentUser={currentUser}
         onOpenAuth={onOpenAuth}

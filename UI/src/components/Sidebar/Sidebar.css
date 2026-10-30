@@ -255,7 +255,12 @@
   background-color: rgba(29, 155, 240, 0.1);
 }
 
-/* Responsive: Icon-only mode */
+.sidebar__mobile-header {
+  display: none;
+}
+
+/* Responsive: Icon-only mode (narrow desktop/tablet: 501px–1280px)
+   Fix #1: Hide the sidebar Post button; the feed TweetComposer is still available. */
 @media (max-width: 1280px) {
   .sidebar {
     width: 88px;
@@ -279,23 +284,9 @@
     height: 50px;
   }
 
+  /* Hide Post button in narrow layout — do not show compressed icon */
   .sidebar__post-btn {
-    width: 50px;
-    height: 50px;
-    min-width: 50px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    align-self: center;
-  }
-
-  .sidebar__post-btn-text {
     display: none;
-  }
-
-  .sidebar__post-btn-icon {
-    display: flex;
   }
 
   .sidebar__profile-text,
@@ -314,8 +305,119 @@
   }
 }
 
+/* Mobile Drawer (<= 500px) */
 @media (max-width: 500px) {
   .sidebar {
     display: none;
+  }
+
+  .sidebar--mobile-open {
+    display: flex !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 280px;
+    max-width: 80vw;
+    height: 100vh;
+    height: 100dvh;
+    background-color: var(--bg-primary, #000000);
+    z-index: 1001;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.85);
+    border-right: 1px solid var(--border-color);
+    align-items: flex-start;
+    padding: 0 16px;
+    animation: sidebarDrawerSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow-y: auto;
+  }
+
+  .sidebar--mobile-open .sidebar__inner {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .sidebar--mobile-open .sidebar__logo {
+    display: none; /* Mobile header already has logo; show drawer title instead */
+  }
+
+  .sidebar--mobile-open .sidebar__mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 12px 4px 8px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 8px;
+  }
+
+  .sidebar__mobile-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .sidebar__mobile-close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .sidebar__mobile-close-btn:hover {
+    background-color: rgba(231, 233, 234, 0.1);
+  }
+
+  .sidebar--mobile-open .sidebar__nav {
+    width: 100%;
+    gap: 4px;
+  }
+
+  .sidebar--mobile-open .sidebar__nav-item {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 12px 16px;
+    height: auto;
+    border-radius: 9999px;
+  }
+
+  .sidebar--mobile-open .sidebar__nav-label {
+    display: inline !important;
+    font-size: 19px;
+  }
+
+  .sidebar--mobile-open .sidebar__profile-text,
+  .sidebar--mobile-open .sidebar__profile-menu {
+    display: flex !important;
+  }
+
+  .sidebar--mobile-open .sidebar__profile {
+    justify-content: space-between;
+    padding: 12px;
+  }
+
+  .sidebar--mobile-open .sidebar__login-btn {
+    display: flex;
+    padding: 12px 20px;
+    font-size: 15px;
+  }
+
+  /* Fix #1 & Fix #6: Hide the sidebar Post button on mobile; keep the feed composer available */
+  .sidebar--mobile-open .sidebar__post-btn {
+    display: none !important;
+  }
+}
+
+@keyframes sidebarDrawerSlideIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
   }
 }

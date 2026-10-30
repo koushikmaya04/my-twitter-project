@@ -6,6 +6,8 @@ import './Sidebar.css';
 /**
  * Sidebar — Left navigation panel matching Twitter/X desktop layout.
  * Displays real authenticated user identity, unread notification counter, and nav controls.
+ *
+ * In mobile view, acts as a slide-in drawer when isMobileOpen is true.
  */
 const Sidebar = ({
   onNavigate,
@@ -14,6 +16,8 @@ const Sidebar = ({
   unreadCount = 0,
   onOpenAuth,
   onLogout,
+  isMobileOpen = false,
+  onCloseMobile,
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -79,14 +83,44 @@ const Sidebar = ({
     ? currentUser.handle
     : `@${currentUser?.handle || 'user'}`;
 
+  const handleNavClick = (itemId) => {
+    onCloseMobile?.();
+    if (itemId === 'profile' && !currentUser) {
+      onOpenAuth?.();
+    } else if (itemId === 'notifications' && !currentUser) {
+      onOpenAuth?.();
+    } else {
+      onNavigate?.(itemId);
+    }
+  };
+
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isMobileOpen ? 'sidebar--mobile-open' : ''}`}>
       <div className="sidebar__inner">
+        {/* Mobile Drawer Header with Close Button */}
+        {isMobileOpen && (
+          <div className="sidebar__mobile-header">
+            <span className="sidebar__mobile-title">Menu</span>
+            <button
+              className="sidebar__mobile-close-btn"
+              onClick={onCloseMobile}
+              aria-label="Close navigation menu"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M10.59 12L4.54 5.96l1.42-1.42L12 10.59l6.04-6.05 1.42 1.42L13.41 12l6.05 6.04-1.42 1.42L12 13.41l-6.04 6.05-1.42-1.42L10.59 12z" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* X Logo */}
         <div className="sidebar__logo">
           <button
             className="sidebar__logo-link"
-            onClick={() => onNavigate?.('home')}
+            onClick={() => {
+              onCloseMobile?.();
+              onNavigate?.('home');
+            }}
             aria-label="X Home"
           >
             <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
@@ -102,15 +136,7 @@ const Sidebar = ({
               key={item.id}
               className={`sidebar__nav-item ${activeItem === item.id ? 'sidebar__nav-item--active' : ''}`}
               aria-label={item.label}
-              onClick={() => {
-                if (item.id === 'profile' && !currentUser) {
-                  onOpenAuth?.();
-                } else if (item.id === 'notifications' && !currentUser) {
-                  onOpenAuth?.();
-                } else {
-                  onNavigate?.(item.id);
-                }
-              }}
+              onClick={() => handleNavClick(item.id)}
             >
               <span className="sidebar__nav-icon">
                 {item.icon}
@@ -127,6 +153,7 @@ const Sidebar = ({
         <button
           className="sidebar__post-btn"
           onClick={() => {
+            onCloseMobile?.();
             if (!currentUser) {
               onOpenAuth?.();
             } else {
@@ -154,6 +181,7 @@ const Sidebar = ({
                     role="menuitem"
                     onClick={() => {
                       setIsMenuOpen(false);
+                      onCloseMobile?.();
                       onNavigate?.('profile');
                     }}
                   >
@@ -164,6 +192,7 @@ const Sidebar = ({
                     role="menuitem"
                     onClick={() => {
                       setIsMenuOpen(false);
+                      onCloseMobile?.();
                       onLogout?.();
                     }}
                   >
@@ -214,7 +243,10 @@ const Sidebar = ({
           ) : (
             <button
               className="sidebar__login-btn"
-              onClick={onOpenAuth}
+              onClick={() => {
+                onCloseMobile?.();
+                onOpenAuth?.();
+              }}
             >
               Sign in
             </button>

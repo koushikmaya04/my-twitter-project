@@ -146,7 +146,7 @@ const ImageModal = ({
               <strong>{tweet.retweetCount || 0}</strong> Reposts
             </span>
             <span className="image-modal__metric-item">
-              <strong>{tweet.likes || 0}</strong> Likes
+              <strong>{tweet.likeCount ?? tweet.likes ?? 0}</strong> Likes
             </span>
           </div>
 

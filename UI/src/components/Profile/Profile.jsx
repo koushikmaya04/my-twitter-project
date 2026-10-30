@@ -70,7 +70,16 @@ const Profile = ({
       // Check if current user is following this profile
       if (currentUser && currentUser.id !== user.id) {
         try {
-          const { items: myFollowing } = await fetchFollowing(currentUser.id, null, 100);
+          const cleanHandle = user.handle ? user.handle.replace(/^@/, '') : '';
+          const alreadyFollowed =
+            followedHandles.includes(user.id) ||
+            Boolean(cleanHandle && (followedHandles.includes(cleanHandle) || followedHandles.includes('@' + cleanHandle)));
+
+          if (alreadyFollowed) {
+            setIsFollowing(true);
+          }
+
+          const { items: myFollowing } = await fetchFollowing(currentUser.id, null, 50);
           const followingThisUser = (myFollowing || []).some((f) => f.id === user.id);
           setIsFollowing(followingThisUser);
         } catch {
@@ -82,7 +91,7 @@ const Profile = ({
     } finally {
       setIsLoading(false);
     }
-  }, [userId, currentUser]);
+  }, [userId, currentUser, followedHandles]);
 
   useEffect(() => {
     loadProfile();

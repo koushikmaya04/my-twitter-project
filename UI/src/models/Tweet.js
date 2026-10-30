@@ -122,6 +122,7 @@ class Tweet extends Post {
   toPlainObject() {
     return {
       ...super.toPlainObject(),
+      isLiked: this.isLiked,
       authorId: this.authorId,
       version: this.version,
       isEdited: this.isEdited,

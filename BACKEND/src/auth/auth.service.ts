@@ -224,6 +224,31 @@ if (
     };
   }
 
+  /**
+   * Resolve the viewer ID from an optional session cookie without throwing.
+   * Returns null when unauthenticated — safe to call on public endpoints.
+   * Fix #3: used by GET /feed to pass the real viewerId so likedByViewer is correct.
+   */
+  async resolveViewer(cookieHeader?: string): Promise<string | null> {
+    const token = this.readSessionToken(cookieHeader);
+    if (!token) return null;
+
+    const [result] = await this.db
+      .select({ id: users.id })
+      .from(sessions)
+      .innerJoin(users, eq(sessions.userId, users.id))
+      .where(
+        and(
+          eq(sessions.tokenHash, this.hashToken(token)),
+          isNull(sessions.revokedAt),
+          gt(sessions.expiresAt, new Date()),
+          isNull(users.deactivatedAt),
+        ),
+      )
+      .limit(1);
+
+    return result?.id ?? null;
+  }
   async me(cookieHeader?: string) {
     const token = this.readSessionToken(cookieHeader);
 

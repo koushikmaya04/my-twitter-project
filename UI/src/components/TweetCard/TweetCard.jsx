@@ -167,6 +167,8 @@ const TweetCard = memo(
         likes: tweet.likes ?? tweet.likeCount,
         isRetweeted: tweet.isRetweeted,
         retweetCount: tweet.retweetCount,
+        comments: tweet.comments !== undefined ? tweet.comments : detailTweet.comments,
+        commentCount: tweet.commentCount !== undefined ? tweet.commentCount : detailTweet.commentCount,
       };
     }, [detailTweet, tweet]);
 

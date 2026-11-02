@@ -68,9 +68,23 @@ const CommentSection = ({
 
   // Combine server replies and local optimistic comments without duplicates
   const allComments = [...serverReplies, ...comments];
-  const uniqueComments = allComments.filter(
-    (c, index, self) => index === self.findIndex((item) => item.id === c.id)
-  );
+  const uniqueComments = allComments.filter((c, index, self) => {
+    return (
+      index ===
+      self.findIndex((item) => {
+        if (item.id && c.id && item.id === c.id) return true;
+        const itemText = (item.content || item.text || '').trim();
+        const cText = (c.content || c.text || '').trim();
+        const isTemp =
+          String(item.id || '').startsWith('comment-') ||
+          String(c.id || '').startsWith('comment-');
+        if (isTemp && itemText && cText && itemText === cText && item.handle === c.handle) {
+          return true;
+        }
+        return false;
+      })
+    );
+  });
 
   return (
     <div className="comment-section">

@@ -227,7 +227,7 @@ const ManageDevices = ({ onBack, onLogout }) => {
                 <div className="manage-devices__item-details">
                   <div className="manage-devices__item-header">
                     <span className="manage-devices__device-name">
-                      {session.browser} on {session.os}
+                      {session.displayName || (session.browser && session.os ? `${session.browser} on ${session.os}` : 'Unknown device')}
                     </span>
                     {session.isCurrent && (
                       <span className="manage-devices__current-badge">
@@ -240,11 +240,7 @@ const ManageDevices = ({ onBack, onLogout }) => {
                     <span className="manage-devices__login-time">
                       Logged in: {formatDateTime(session.createdAt)}
                     </span>
-                    {session.ipAddress && (
-                      <span className="manage-devices__ip">
-                        &bull; {session.ipAddress}
-                      </span>
-                    )}
+
                   </div>
                 </div>
 

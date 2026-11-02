@@ -2,6 +2,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Optional,
   UnauthorizedException,
   NotFoundException,
    BadRequestException,
@@ -9,13 +10,18 @@ import {
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import * as argon2 from 'argon2';
 import { and, desc, eq, gt, isNull, ne } from 'drizzle-orm';
+import { parseUserAgent } from '../common/device-detection/device-detector';
+import { AuditLoggerService } from '../common/logger/audit-logger.service';
 
 import { DATABASE } from '../database/database.provider';
 import { sessions, users } from '../database/schema';
 
 @Injectable()
 export class AuthService {
-  constructor(@Inject(DATABASE) private readonly db: any) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: any,
+    @Optional() private readonly auditLogger?: AuditLoggerService,
+  ) {}
 
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
@@ -170,38 +176,55 @@ const passwordHash = await argon2.hash(password);
 
   async login(
     input: { handle: string; password: string },
-    metadata?: { userAgent?: string; ipAddress?: string },
+    metadata?: { userAgent?: string; requestId?: string },
   ) {
-   const body = this.validateObjectInput(input, [
-  'handle',
-  'password',
-]);
+    const body = this.validateObjectInput(input, [
+      'handle',
+      'password',
+    ]);
 
-const handle = this.normalizeAndValidateHandle(
-  body.handle,
-);
+    const handle = this.normalizeAndValidateHandle(
+      body.handle,
+    );
 
-const password = this.validatePassword(body.password);
+    const password = this.validatePassword(body.password);
 
-   const [user] = await this.db
-  .select({
-    id: users.id,
-    handle: users.handle,
-    displayName: users.displayName,
-    createdAt: users.createdAt,
-    passwordHash: users.passwordHash,
-    deactivatedAt: users.deactivatedAt,
-  })
+    const [user] = await this.db
+      .select({
+        id: users.id,
+        handle: users.handle,
+        displayName: users.displayName,
+        createdAt: users.createdAt,
+        passwordHash: users.passwordHash,
+        deactivatedAt: users.deactivatedAt,
+      })
       .from(users)
       .where(eq(users.handle, handle))
       .limit(1);
-if (
-  !user?.passwordHash ||
-  !(await argon2.verify(user.passwordHash, password)) ||
-  user.deactivatedAt !== null
-) {
-  throw new UnauthorizedException('Invalid handle or password');
-}
+
+    if (
+      !user?.passwordHash ||
+      !(await argon2.verify(user.passwordHash, password)) ||
+      user.deactivatedAt !== null
+    ) {
+      if (this.auditLogger) {
+        await this.auditLogger.log({
+          action: 'LOGIN_FAILED',
+          actorUsername: handle,
+          targetType: 'USER',
+          targetUsername: user?.handle ?? handle,
+          targetId: user?.id ?? null,
+          httpMethod: 'POST',
+          route: '/auth/login',
+          statusCode: 401,
+          success: false,
+          requestId: metadata?.requestId ?? null,
+          description: 'Login failed: invalid handle or password',
+          errorCode: 'UNAUTHORIZED',
+        });
+      }
+      throw new UnauthorizedException('Invalid handle or password');
+    }
 
     // Send the raw token only to the browser; store its hash in PostgreSQL.
     const token = randomBytes(32).toString('base64url');
@@ -210,13 +233,47 @@ if (
       Date.now() + 7 * 24 * 60 * 60 * 1000,
     );
 
-    await this.db.insert(sessions).values({
-      tokenHash,
-      userId: user.id,
-      expiresAt,
-      userAgent: metadata?.userAgent || null,
-      ipAddress: metadata?.ipAddress || null,
-    });
+    const [sessionRecord] = await this.db
+      .insert(sessions)
+      .values({
+        tokenHash,
+        userId: user.id,
+        expiresAt,
+        userAgent: metadata?.userAgent || null,
+      })
+      .returning({ id: sessions.id });
+
+    if (this.auditLogger) {
+      await this.auditLogger.log({
+        action: 'LOGIN_SUCCESS',
+        actorUserId: user.id,
+        actorUsername: user.handle,
+        targetType: 'USER',
+        targetId: user.id,
+        targetUsername: user.handle,
+        httpMethod: 'POST',
+        route: '/auth/login',
+        statusCode: 200,
+        success: true,
+        requestId: metadata?.requestId ?? null,
+        sessionId: sessionRecord?.id ?? null,
+        description: 'User logged in successfully',
+      });
+      await this.auditLogger.log({
+        action: 'SESSION_CREATED',
+        actorUserId: user.id,
+        actorUsername: user.handle,
+        targetType: 'SESSION',
+        targetId: sessionRecord?.id ?? null,
+        httpMethod: 'POST',
+        route: '/auth/login',
+        statusCode: 200,
+        success: true,
+        requestId: metadata?.requestId ?? null,
+        sessionId: sessionRecord?.id ?? null,
+        description: 'New session created upon login',
+      });
+    }
 
     return {
       token,
@@ -321,86 +378,66 @@ async deactivate(userId: string): Promise<void> {
         ),
       );
   });
+
+  if (this.auditLogger) {
+    await this.auditLogger.log({
+      action: 'ACCOUNT_DEACTIVATED',
+      actorUserId: userId,
+      targetType: 'ACCOUNT',
+      targetId: userId,
+      httpMethod: 'POST',
+      route: '/auth/deactivate',
+      statusCode: 200,
+      success: true,
+      description: 'Account deactivated and active sessions revoked',
+    });
+  }
 }
 
-  async logout(cookieHeader?: string) {
+  async logout(cookieHeader?: string, requestId?: string) {
     const token = this.readSessionToken(cookieHeader);
 
     if (!token) {
       return;
     }
 
-    await this.db
+    const tokenHash = this.hashToken(token);
+    const [revokedSession] = await this.db
       .update(sessions)
       .set({ revokedAt: new Date() })
       .where(
         and(
-          eq(sessions.tokenHash, this.hashToken(token)),
+          eq(sessions.tokenHash, tokenHash),
           isNull(sessions.revokedAt),
         ),
-      );
+      )
+      .returning({ id: sessions.id, userId: sessions.userId });
+
+    if (this.auditLogger && revokedSession) {
+      await this.auditLogger.log({
+        action: 'LOGOUT',
+        actorUserId: revokedSession.userId,
+        targetType: 'SESSION',
+        targetId: revokedSession.id,
+        httpMethod: 'POST',
+        route: '/auth/logout',
+        statusCode: 200,
+        success: true,
+        requestId: requestId ?? null,
+        sessionId: revokedSession.id,
+        description: 'User logged out and session revoked',
+      });
+    }
   }
 
-  parseUserAgent(userAgent?: string | null): {
-    browser: string;
-    os: string;
-    deviceType: 'desktop' | 'mobile' | 'tablet';
-  } {
-    if (!userAgent) {
-      return {
-        browser: 'Web Browser',
-        os: 'Desktop / Mobile Device',
-        deviceType: 'desktop',
-      };
-    }
-    const ua = userAgent;
-    let browser = 'Web Browser';
-    if (ua.includes('Firefox/')) {
-      browser = 'Firefox';
-    } else if (ua.includes('Edg/') || ua.includes('Edge/')) {
-      browser = 'Edge';
-    } else if (ua.includes('Chrome/') && ua.includes('Safari/')) {
-      browser = 'Chrome';
-    } else if (ua.includes('Safari/') && !ua.includes('Chrome/')) {
-      browser = 'Safari';
-    } else if (ua.includes('MSIE') || ua.includes('Trident/')) {
-      browser = 'Internet Explorer';
-    } else if (ua.includes('Opera/') || ua.includes('OPR/')) {
-      browser = 'Opera';
-    }
-
-    let os = 'Unknown OS';
-    if (ua.includes('Windows NT 10.0')) {
-      os = 'Windows 10/11';
-    } else if (ua.includes('Windows NT')) {
-      os = 'Windows';
-    } else if (ua.includes('iPhone')) {
-      os = 'iOS (iPhone)';
-    } else if (ua.includes('iPad')) {
-      os = 'iOS (iPad)';
-    } else if (ua.includes('Macintosh') || ua.includes('Mac OS X')) {
-      os = 'macOS';
-    } else if (ua.includes('Android')) {
-      os = 'Android';
-    } else if (ua.includes('Linux')) {
-      os = 'Linux';
-    }
-
-    let deviceType: 'desktop' | 'mobile' | 'tablet' = 'desktop';
-    if (ua.includes('iPad') || ua.includes('Tablet')) {
-      deviceType = 'tablet';
-    } else if (ua.includes('Mobile') || ua.includes('iPhone') || ua.includes('Android')) {
-      deviceType = 'mobile';
-    }
-
-    return { browser, os, deviceType };
+  parseUserAgent(userAgent?: string | null) {
+    return parseUserAgent(userAgent);
   }
 
   async getSessions(
     userId: string,
     currentCookie?: string,
     currentUserAgent?: string,
-    currentIp?: string,
   ) {
     const currentToken = this.readSessionToken(currentCookie);
     const currentTokenHash = currentToken ? this.hashToken(currentToken) : null;
@@ -411,7 +448,6 @@ async deactivate(userId: string): Promise<void> {
         .update(sessions)
         .set({
           userAgent: currentUserAgent,
-          ...(currentIp ? { ipAddress: currentIp } : {}),
         })
         .where(
           and(
@@ -427,7 +463,6 @@ async deactivate(userId: string): Promise<void> {
         createdAt: sessions.createdAt,
         expiresAt: sessions.expiresAt,
         userAgent: sessions.userAgent,
-        ipAddress: sessions.ipAddress,
         tokenHash: sessions.tokenHash,
       })
       .from(sessions)
@@ -447,9 +482,11 @@ async deactivate(userId: string): Promise<void> {
         createdAt: s.createdAt,
         expiresAt: s.expiresAt,
         browser: parsed.browser,
+        browserVersion: parsed.browserVersion,
         os: parsed.os,
+        osVersion: parsed.osVersion,
         deviceType: parsed.deviceType,
-        ipAddress: s.ipAddress || null,
+        displayName: parsed.displayName,
         isCurrent: Boolean(currentTokenHash && s.tokenHash === currentTokenHash),
       };
     });
@@ -460,7 +497,12 @@ async deactivate(userId: string): Promise<void> {
     };
   }
 
-  async revokeSession(userId: string, sessionId: string, currentCookie?: string) {
+  async revokeSession(
+    userId: string,
+    sessionId: string,
+    currentCookie?: string,
+    metadata?: { requestId?: string; actorUsername?: string },
+  ) {
     const currentToken = this.readSessionToken(currentCookie);
     const currentTokenHash = currentToken ? this.hashToken(currentToken) : null;
     const now = new Date();
@@ -497,13 +539,35 @@ async deactivate(userId: string): Promise<void> {
       currentTokenHash && sessionToRevoke.tokenHash === currentTokenHash,
     );
 
+    if (this.auditLogger) {
+      await this.auditLogger.log({
+        action: 'SESSION_REVOKED',
+        actorUserId: userId,
+        actorUsername: metadata?.actorUsername ?? null,
+        targetType: 'SESSION',
+        targetId: sessionId,
+        httpMethod: 'DELETE',
+        route: `/auth/sessions/${sessionId}`,
+        statusCode: 200,
+        success: true,
+        requestId: metadata?.requestId ?? null,
+        description: isCurrent
+          ? 'Current session revoked by user'
+          : 'Secondary device session revoked by user',
+      });
+    }
+
     return {
       revoked: true,
       isCurrent,
     };
   }
 
-  async revokeOtherSessions(userId: string, currentCookie?: string) {
+  async revokeOtherSessions(
+    userId: string,
+    currentCookie?: string,
+    metadata?: { requestId?: string; actorUsername?: string },
+  ) {
     const currentToken = this.readSessionToken(currentCookie);
     if (!currentToken) {
       throw new UnauthorizedException('Authentication required');
@@ -544,8 +608,27 @@ async deactivate(userId: string): Promise<void> {
       )
       .returning({ id: sessions.id });
 
+    const revokedCount = (updated || []).length;
+
+    if (this.auditLogger) {
+      await this.auditLogger.log({
+        action: 'OTHER_SESSIONS_REVOKED',
+        actorUserId: userId,
+        actorUsername: metadata?.actorUsername ?? null,
+        targetType: 'SESSION',
+        targetId: currentSession.id,
+        httpMethod: 'POST',
+        route: '/auth/sessions/revoke-others',
+        statusCode: 200,
+        success: true,
+        requestId: metadata?.requestId ?? null,
+        sessionId: currentSession.id,
+        description: `Revoked ${revokedCount} other session(s), preserving current session`,
+      });
+    }
+
     return {
-      revokedCount: (updated || []).length,
+      revokedCount,
     };
   }
 }

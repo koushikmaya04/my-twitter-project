@@ -3,7 +3,9 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { AuditLoggerService } from '../common/logger/audit-logger.service';
 import { and, desc, eq, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
@@ -25,6 +27,7 @@ export class NotificationsService {
   constructor(
     @Inject(DATABASE)
     private readonly db: any,
+    @Optional() private readonly auditLogger?: AuditLoggerService,
   ) {}
 
   private encodeCursor(createdAt: Date, id: string): string {
@@ -253,6 +256,21 @@ export class NotificationsService {
       throw new NotFoundException('Notification could not be loaded');
     }
 
+    if (this.auditLogger) {
+      await this.auditLogger.log({
+        action: 'NOTIFICATION_READ',
+        actorUserId: recipientId,
+        actorUsername: row.actorHandle,
+        targetType: 'NOTIFICATION',
+        targetId: notificationId,
+        httpMethod: 'PATCH',
+        route: `/notifications/${notificationId}/read`,
+        statusCode: 200,
+        success: true,
+        description: 'Single notification marked as read',
+      });
+    }
+
     return {
       id: row.id,
       type: row.type as NotificationType,
@@ -304,6 +322,19 @@ export class NotificationsService {
         ),
       )
       .returning({ id: notifications.id });
+
+    if (this.auditLogger) {
+      await this.auditLogger.log({
+        action: 'NOTIFICATION_READ',
+        actorUserId: recipientId,
+        targetType: 'NOTIFICATION',
+        httpMethod: 'PATCH',
+        route: '/notifications/read-all',
+        statusCode: 200,
+        success: true,
+        description: `Marked ${updated.length} notifications as read`,
+      });
+    }
 
     return {
       updatedCount: updated.length,

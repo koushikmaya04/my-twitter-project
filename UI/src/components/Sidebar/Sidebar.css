@@ -222,6 +222,13 @@
   text-align: left;
   transition: background-color 0.2s ease;
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar__menu-popup-icon {
+  flex-shrink: 0;
 }
 
 .sidebar__menu-popup-item:hover {

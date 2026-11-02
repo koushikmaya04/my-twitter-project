@@ -203,6 +203,47 @@ export async function deactivateAccount() {
   };
 }
 
+/**
+ * Fetch active sessions for the current authenticated user.
+ * Contract: GET /auth/sessions
+ */
+export async function fetchSessions() {
+  const { data, requestId } = await apiFetch('/auth/sessions');
+  return {
+    items: data.items || [],
+    count: data.count || 0,
+    requestId,
+  };
+}
+
+/**
+ * Revoke a specific session by ID.
+ * Contract: DELETE /auth/sessions/:id
+ */
+export async function revokeSession(sessionId) {
+  const { data, requestId } = await apiFetch(`/auth/sessions/${sessionId}`, {
+    method: 'DELETE',
+  });
+  return {
+    item: data.item ?? data,
+    requestId,
+  };
+}
+
+/**
+ * Revoke all other active sessions except the current one.
+ * Contract: POST /auth/sessions/revoke-others
+ */
+export async function revokeOtherSessions() {
+  const { data, requestId } = await apiFetch('/auth/sessions/revoke-others', {
+    method: 'POST',
+  });
+  return {
+    item: data.item ?? data,
+    requestId,
+  };
+}
+
 /* ─────────────────────────────────────────────────────────────
  * P0-04: Feeds (Public & Personalized Home Feed)
  * ───────────────────────────────────────────────────────────── */

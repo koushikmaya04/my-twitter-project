@@ -43,6 +43,13 @@
       "when": 1793029997536,
       "tag": "0005_cooing_frightful_four",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793617238659,
+      "tag": "0006_flimsy_guardsmen",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import RightSidebar from '../../components/RightSidebar/RightSidebar.jsx';
 import AuthModal from '../../components/AuthModal/AuthModal.jsx';
 import Notifications from '../../components/Notifications/Notifications.jsx';
 import Profile from '../../components/Profile/Profile.jsx';
+import ManageDevices from '../../components/ManageDevices/ManageDevices.jsx';
 import {
   fetchPosts,
   fetchHomeFeed,
@@ -985,6 +986,13 @@ const Home = () => {
           onLogout={handleLogout}
           onUpdateCurrentUser={handleUpdateCurrentUser}
           onViewUserProfile={handleViewUserProfile}
+        />
+      )}
+
+      {activeNav === 'devices' && (
+        <ManageDevices
+          onBack={() => setActiveNav('home')}
+          onLogout={handleLogout}
         />
       )}
 

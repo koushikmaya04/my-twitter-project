@@ -27,6 +27,12 @@ export const sessions = pgTable(
       precision: 3,
     }),
 
+    id: uuid('id').defaultRandom().notNull(),
+
+    userAgent: text('user_agent'),
+
+    ipAddress: text('ip_address'),
+
     createdAt: timestamp('created_at', {
       withTimezone: true,
       precision: 3,

@@ -6,6 +6,8 @@ export interface AuthenticatedUser {
   handle: string;
   displayName: string;
   createdAt: Date | string;
+  sessionId?: string;
+  tokenHash?: string;
 }
 
 export interface AuthenticatedRequest extends Request {

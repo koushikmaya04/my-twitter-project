@@ -221,7 +221,7 @@ export async function fetchSessions() {
  * Contract: DELETE /auth/sessions/:id
  */
 export async function revokeSession(sessionId) {
-  const { data, requestId } = await apiFetch(`/auth/sessions/`, {
+  const { data, requestId } = await apiFetch(`/auth/sessions/${sessionId}`, {
     method: 'DELETE',
   });
   return {

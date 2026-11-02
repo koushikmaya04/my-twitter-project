@@ -346,8 +346,15 @@ async deactivate(userId: string): Promise<void> {
     os: string;
     deviceType: 'desktop' | 'mobile' | 'tablet';
   } {
-    const ua = userAgent || '';
-    let browser = 'Unknown Browser';
+    if (!userAgent) {
+      return {
+        browser: 'Web Browser',
+        os: 'Desktop / Mobile Device',
+        deviceType: 'desktop',
+      };
+    }
+    const ua = userAgent;
+    let browser = 'Web Browser';
     if (ua.includes('Firefox/')) {
       browser = 'Firefox';
     } else if (ua.includes('Edg/') || ua.includes('Edge/')) {
@@ -389,10 +396,30 @@ async deactivate(userId: string): Promise<void> {
     return { browser, os, deviceType };
   }
 
-  async getSessions(userId: string, currentCookie?: string) {
+  async getSessions(
+    userId: string,
+    currentCookie?: string,
+    currentUserAgent?: string,
+    currentIp?: string,
+  ) {
     const currentToken = this.readSessionToken(currentCookie);
     const currentTokenHash = currentToken ? this.hashToken(currentToken) : null;
     const now = new Date();
+
+    if (currentTokenHash && currentUserAgent) {
+      await this.db
+        .update(sessions)
+        .set({
+          userAgent: currentUserAgent,
+          ...(currentIp ? { ipAddress: currentIp } : {}),
+        })
+        .where(
+          and(
+            eq(sessions.tokenHash, currentTokenHash),
+            isNull(sessions.userAgent),
+          ),
+        );
+    }
 
     const activeSessions = await this.db
       .select({

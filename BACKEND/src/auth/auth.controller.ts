@@ -93,9 +93,17 @@ async deactivate(
   @Get('sessions')
   @UseGuards(SessionGuard)
   async getSessions(@Req() request: AuthenticatedRequest) {
+    const userAgent = request.headers['user-agent'] as string | undefined;
+    const ipAddress =
+      (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      request.ip ||
+      request.socket?.remoteAddress;
+
     return this.authService.getSessions(
       request.user.id,
       request.headers.cookie,
+      userAgent,
+      ipAddress,
     );
   }
 

@@ -1,42 +1,49 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
       '/auth': {
-        target: 'http://localhost:3000',
+        target: 'https://social-feed-backend-kc5w.onrender.com',
         changeOrigin: true,
+        secure: true,
       },
       '/feed': {
-        target: 'http://localhost:3000',
+        target: 'https://social-feed-backend-kc5w.onrender.com',
         changeOrigin: true,
+        secure: true,
       },
       '/posts': {
-        target: 'http://localhost:3000',
+        target: 'https://social-feed-backend-kc5w.onrender.com',
         changeOrigin: true,
+        secure: true,
       },
       '/notifications': {
-        target: 'http://localhost:3000',
+        target: 'https://social-feed-backend-kc5w.onrender.com',
         changeOrigin: true,
+        secure: true,
       },
       '/users': {
-        target: 'http://localhost:3000',
+        target: 'https://social-feed-backend-kc5w.onrender.com',
         changeOrigin: true,
+        secure: true,
       },
       '/search': {
-        target: 'http://localhost:3000',
+        target: 'https://social-feed-backend-kc5w.onrender.com',
         changeOrigin: true,
+        secure: true,
       },
       '/health': {
-        target: 'http://localhost:3000',
+        target: 'https://social-feed-backend-kc5w.onrender.com',
         changeOrigin: true,
+        secure: true,
       },
       '/fixtures': {
-        target: 'http://localhost:3000',
+        target: 'https://social-feed-backend-kc5w.onrender.com',
         changeOrigin: true,
+        secure: true,
       },
     },
   },

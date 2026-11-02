@@ -211,8 +211,9 @@ describe('AuthService', () => {
       expect(result.items[0].id).toBe(sessionId);
       expect(result.items[0].isCurrent).toBe(true);
       expect(result.items[0].browser).toBe('Chrome');
-      expect(result.items[0].os).toBe('Windows 10/11');
-      expect(result.items[0].deviceType).toBe('desktop');
+      expect(result.items[0].os).toBe('Windows');
+      expect(result.items[0].displayName).toBe('Chrome on Windows 10/11');
+      expect(result.items[0].deviceType).toBe('Desktop');
     });
 
     it('should revoke a session by id', async () => {

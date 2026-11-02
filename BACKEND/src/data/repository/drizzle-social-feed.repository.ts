@@ -30,6 +30,7 @@ import { validateCursor } from '../../common/cursor-validation/cursor.validation
 import { SOCIAL_FEED_READ_FAILURE } from './social-feed-read-failure.token';
 import type { SocialFeedReadFailure } from './social-feed-read-failure.token';
 
+import { AuditLoggerService } from '../../common/logger/audit-logger.service';
 import {
   ConflictDomainError,
   InvalidTargetError,
@@ -48,6 +49,9 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
 
     @Optional()
     private readonly configService?: ConfigService,
+
+    @Optional()
+    private readonly auditLogger?: AuditLoggerService,
   ) {}
 
   private checkReadFailure(): void {
@@ -733,7 +737,7 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
   async createPost(command: CreatePostCommand): Promise<PostRecord> {
     const { authorId, kind, text, replyToId, repostOfId } = command;
 
-    return this.db.transaction(async (tx: any) => {
+    const createdRecord = await this.db.transaction(async (tx: any) => {
       if (kind === 'reply') {
         if (!replyToId) {
           throw new InvalidTargetError('replyToId is required for reply');
@@ -873,6 +877,27 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
 
       return result;
     });
+
+    if (this.auditLogger) {
+      const action = kind === 'reply' ? 'REPLY_CREATED' : kind === 'repost' ? 'REPOST_CREATED' : 'POST_CREATED';
+      const targetId = kind === 'reply' ? replyToId : kind === 'repost' ? repostOfId : createdRecord.id;
+
+      await this.auditLogger.log({
+        action: action as any,
+        actorUserId: authorId,
+        actorUsername: createdRecord.author?.handle ?? null,
+        targetType: 'POST',
+        targetId: targetId ?? createdRecord.id,
+        targetUsername: createdRecord.author?.handle ?? null,
+        httpMethod: 'POST',
+        route: '/posts',
+        statusCode: 201,
+        success: true,
+        description: `${action} successfully`,
+      });
+    }
+
+    return createdRecord;
   }
 
   async updatePost(command: UpdatePostCommand): Promise<UpdatePostResult> {
@@ -954,6 +979,22 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
       throw new NotFoundDomainError('Updated post could not be loaded');
     }
 
+    if (this.auditLogger) {
+      await this.auditLogger.log({
+        action: 'POST_EDITED',
+        actorUserId: authorId,
+        actorUsername: post.author?.handle ?? null,
+        targetType: 'POST',
+        targetId: postId,
+        targetUsername: post.author?.handle ?? null,
+        httpMethod: 'PATCH',
+        route: `/feed/posts/${postId}`,
+        statusCode: 200,
+        success: true,
+        description: 'Post edited successfully within 30-minute window',
+      });
+    }
+
     return { status: 'updated', post };
   }
 
@@ -999,6 +1040,21 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
         ),
       );
 
+    if (this.auditLogger) {
+      const action = current.kind === 'reply' ? 'REPLY_DELETED' : current.kind === 'repost' ? 'REPOST_REMOVED' : 'POST_DELETED';
+      await this.auditLogger.log({
+        action: action as any,
+        actorUserId: authorId,
+        targetType: 'POST',
+        targetId: postId,
+        httpMethod: 'DELETE',
+        route: `/feed/posts/${postId}`,
+        statusCode: 204,
+        success: true,
+        description: `${action} successfully`,
+      });
+    }
+
     return { status: 'deleted' };
   }
 
@@ -1010,7 +1066,7 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
     likedByViewer: boolean;
     likeCount: number;
   }> {
-    return this.db.transaction(async (tx: any) => {
+    const finalLikeResult = await this.db.transaction(async (tx: any) => {
       const postRows = await tx
         .select({ id: posts.id, authorId: posts.authorId })
         .from(posts)
@@ -1081,6 +1137,37 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
         likeCount: Number(result.count),
       };
     });
+
+    if (this.auditLogger) {
+      const [actor] = await this.db
+        .select({ handle: users.handle })
+        .from(users)
+        .where(eq(users.id, viewerId))
+        .limit(1);
+
+      const [postOwner] = await this.db
+        .select({ handle: users.handle })
+        .from(posts)
+        .innerJoin(users, eq(posts.authorId, users.id))
+        .where(eq(posts.id, postId))
+        .limit(1);
+
+      await this.auditLogger.log({
+        action: desiredState ? 'LIKE_CREATED' : 'LIKE_REMOVED',
+        actorUserId: viewerId,
+        actorUsername: actor?.handle ?? null,
+        targetType: 'POST',
+        targetId: postId,
+        targetUsername: postOwner?.handle ?? null,
+        httpMethod: 'POST',
+        route: `/posts/${postId}/like`,
+        statusCode: 200,
+        success: true,
+        description: desiredState ? 'Post liked' : 'Post unliked',
+      });
+    }
+
+    return finalLikeResult;
   }
 
   async setFollow(
@@ -1098,7 +1185,7 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
       throw new InvalidTargetError('A user cannot follow themselves');
     }
 
-    return this.db.transaction(async (tx: any) => {
+    const finalFollowResult = await this.db.transaction(async (tx: any) => {
       const [follower] = await tx
         .select({ id: users.id })
         .from(users)
@@ -1193,6 +1280,36 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
         followingCount: followingCountRow?.count ?? 0,
       };
     });
+
+    if (this.auditLogger) {
+      const [followerUser] = await this.db
+        .select({ handle: users.handle })
+        .from(users)
+        .where(eq(users.id, followerId))
+        .limit(1);
+
+      const [targetUser] = await this.db
+        .select({ handle: users.handle })
+        .from(users)
+        .where(eq(users.id, followingId))
+        .limit(1);
+
+      await this.auditLogger.log({
+        action: desiredState ? 'FOLLOW_CREATED' : 'FOLLOW_REMOVED',
+        actorUserId: followerId,
+        actorUsername: followerUser?.handle ?? null,
+        targetType: 'USER',
+        targetId: followingId,
+        targetUsername: targetUser?.handle ?? null,
+        httpMethod: desiredState ? 'POST' : 'DELETE',
+        route: `/users/${followingId}/follow`,
+        statusCode: 200,
+        success: true,
+        description: desiredState ? `Followed user ${targetUser?.handle ?? followingId}` : `Unfollowed user ${targetUser?.handle ?? followingId}`,
+      });
+    }
+
+    return finalFollowResult;
   }
 
   async isFollowing(followerId: string, followingId: string): Promise<boolean> {
@@ -1418,7 +1535,25 @@ export class DrizzleSocialFeedRepository implements SocialFeedRepository {
       return null;
     }
 
-    return this.getUserById(command.userId);
+    const user = await this.getUserById(command.userId);
+
+    if (this.auditLogger && user) {
+      await this.auditLogger.log({
+        action: 'PROFILE_UPDATED',
+        actorUserId: command.userId,
+        actorUsername: user.handle,
+        targetType: 'USER',
+        targetId: command.userId,
+        targetUsername: user.handle,
+        httpMethod: 'PATCH',
+        route: '/users/me',
+        statusCode: 200,
+        success: true,
+        description: 'User profile details updated',
+      });
+    }
+
+    return user;
   }
   private getUserAvatar(handle: string) {
     const cleanHandle = handle.toLowerCase().replace(/^@/, '').trim();

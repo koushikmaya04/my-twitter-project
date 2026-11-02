@@ -25,6 +25,7 @@ import { DatabaseModule } from './database/database.module';
 
 import { AuthModule } from './auth/auth.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { AuditLoggerModule } from './common/logger/audit-logger.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     AuthModule,
 
     NotificationsModule,
+    AuditLoggerModule,
   ],
 })
 export class AppModule {

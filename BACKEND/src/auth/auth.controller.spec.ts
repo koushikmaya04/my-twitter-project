@@ -40,7 +40,7 @@ describe('AuthController', () => {
 
     const res = await controller.getSessions(req);
     expect(res).toEqual({ items: [{ id: 's1', isCurrent: true }], count: 1 });
-    expect(mockService.getSessions).toHaveBeenCalledWith('u1', 'session=tok', undefined, undefined);
+    expect(mockService.getSessions).toHaveBeenCalledWith('u1', 'session=tok', undefined);
   });
 
   it('should revoke a session and clear cookie if it is current', async () => {

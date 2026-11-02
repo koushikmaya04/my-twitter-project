@@ -37,18 +37,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() body: { handle: string; password: string },
-    @Req() request: Request,
+    @Req() request: Request & { requestId?: string },
     @Res({ passthrough: true }) response: Response,
   ) {
     const userAgent = request.headers['user-agent'] as string | undefined;
-    const ipAddress =
-      (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-      request.ip ||
-      request.socket?.remoteAddress;
 
     const result = await this.authService.login(body, {
       userAgent,
-      ipAddress,
+      requestId: request.requestId,
     });
 
    response.cookie('session', result.token, {
@@ -67,43 +63,38 @@ export class AuthController {
     const user = await this.authService.me(request.headers.cookie);
     return { item: user };
   }
-@Post('deactivate')
-@UseGuards(SessionGuard)
-async deactivate(
-  @Req() request: AuthenticatedRequest,
-  @Res({ passthrough: true }) response: Response,
-) {
-  if (!request.user) {
-    throw new UnauthorizedException('Authentication required');
+
+  @Post('deactivate')
+  @UseGuards(SessionGuard)
+  async deactivate(
+    @Req() request: AuthenticatedRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    if (!request.user) {
+      throw new UnauthorizedException('Authentication required');
+    }
+
+    await this.authService.deactivate(request.user.id);
+
+    response.clearCookie('session', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+    });
+
+    return { item: { deactivated: true } };
   }
-
-  await this.authService.deactivate(request.user.id);
-
-  response.clearCookie('session', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-  });
-
-  return { item: { deactivated: true } };
-}
-
 
   @Get('sessions')
   @UseGuards(SessionGuard)
   async getSessions(@Req() request: AuthenticatedRequest) {
     const userAgent = request.headers['user-agent'] as string | undefined;
-    const ipAddress =
-      (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-      request.ip ||
-      request.socket?.remoteAddress;
 
     return this.authService.getSessions(
       request.user.id,
       request.headers.cookie,
       userAgent,
-      ipAddress,
     );
   }
 
@@ -111,13 +102,17 @@ async deactivate(
   @UseGuards(SessionGuard)
   async revokeSession(
     @Param('id') id: string,
-    @Req() request: AuthenticatedRequest,
+    @Req() request: AuthenticatedRequest & { requestId?: string },
     @Res({ passthrough: true }) response: Response,
   ) {
     const result = await this.authService.revokeSession(
       request.user.id,
       id,
       request.headers.cookie,
+      {
+        requestId: request.requestId,
+        actorUsername: request.user.handle,
+      },
     );
 
     if (result.isCurrent) {
@@ -140,10 +135,16 @@ async deactivate(
   @Post('sessions/revoke-others')
   @UseGuards(SessionGuard)
   @HttpCode(HttpStatus.OK)
-  async revokeOtherSessions(@Req() request: AuthenticatedRequest) {
+  async revokeOtherSessions(
+    @Req() request: AuthenticatedRequest & { requestId?: string },
+  ) {
     const result = await this.authService.revokeOtherSessions(
       request.user.id,
       request.headers.cookie,
+      {
+        requestId: request.requestId,
+        actorUsername: request.user.handle,
+      },
     );
 
     return {
@@ -154,10 +155,10 @@ async deactivate(
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   async logout(
-    @Req() request: Request,
+    @Req() request: Request & { requestId?: string },
     @Res({ passthrough: true }) response: Response,
   ) {
-    await this.authService.logout(request.headers.cookie);
+    await this.authService.logout(request.headers.cookie, request.requestId);
 
     response.clearCookie('session', {
       httpOnly: true,

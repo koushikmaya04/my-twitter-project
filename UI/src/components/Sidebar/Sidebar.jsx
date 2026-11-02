@@ -185,7 +185,24 @@ const Sidebar = ({
                       onNavigate?.('profile');
                     }}
                   >
-                    View profile
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" className="sidebar__menu-popup-icon">
+                      <path d="M12 11.816A5.414 5.414 0 0017.408 6.4 5.414 5.414 0 0012 .984 5.414 5.414 0 006.592 6.4 5.414 5.414 0 0012 11.816zm0-8.832A3.418 3.418 0 0115.408 6.4 3.418 3.418 0 0112 9.816 3.418 3.418 0 018.592 6.4 3.418 3.418 0 0112 2.984zm0 10.832c-4.42 0-8 3.58-8 8v1.2h16v-1.2c0-4.42-3.58-8-8-8zm-6 7.2c.576-3.03 3.018-5.2 6-5.2s5.424 2.17 6 5.2H6z" />
+                    </svg>
+                    <span>View profile</span>
+                  </button>
+                  <button
+                    className="sidebar__menu-popup-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      onCloseMobile?.();
+                      onNavigate?.('devices');
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" className="sidebar__menu-popup-icon">
+                      <path d="M4 6h16v10H4V6zm16-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h6l-2 2v1h8v-1l-2-2h6c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-3 15h4v-7h-4v7zm-1-8h6v9h-6v-9z" />
+                    </svg>
+                    <span>Manage devices</span>
                   </button>
                   <button
                     className="sidebar__menu-popup-item sidebar__menu-popup-item--danger"

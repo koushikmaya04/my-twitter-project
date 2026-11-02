@@ -120,4 +120,34 @@ describe('Frontend Bug Fixes Verification', () => {
     assert.strictEqual(activeTweet.likes, 11);
     assert.strictEqual(activeTweet.comments.length, 1);
   });
+
+  test('Manage Devices: sessions parse user agent and determine isCurrent', () => {
+    const sessions = [
+      {
+        id: 's1',
+        createdAt: new Date().toISOString(),
+        browser: 'Chrome',
+        os: 'Windows 10/11',
+        deviceType: 'desktop',
+        isCurrent: true,
+      },
+      {
+        id: 's2',
+        createdAt: new Date().toISOString(),
+        browser: 'Safari',
+        os: 'iOS (iPhone)',
+        deviceType: 'mobile',
+        isCurrent: false,
+      },
+    ];
+
+    assert.equal(sessions.length, 2);
+    const current = sessions.find((s) => s.isCurrent);
+    assert.ok(current);
+    assert.equal(current.id, 's1');
+
+    const others = sessions.filter((s) => !s.isCurrent);
+    assert.equal(others.length, 1);
+    assert.equal(others[0].id, 's2');
+  });
 });

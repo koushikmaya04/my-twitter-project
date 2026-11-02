@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import * as argon2 from 'argon2';
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, ne } from 'drizzle-orm';
 
 import { DATABASE } from '../database/database.provider';
 import { sessions, users } from '../database/schema';
@@ -168,7 +168,10 @@ const passwordHash = await argon2.hash(password);
     }
   }
 
-  async login(input: { handle: string; password: string }) {
+  async login(
+    input: { handle: string; password: string },
+    metadata?: { userAgent?: string; ipAddress?: string },
+  ) {
    const body = this.validateObjectInput(input, [
   'handle',
   'password',
@@ -211,6 +214,8 @@ if (
       tokenHash,
       userId: user.id,
       expiresAt,
+      userAgent: metadata?.userAgent || null,
+      ipAddress: metadata?.ipAddress || null,
     });
 
     return {
@@ -226,7 +231,7 @@ if (
 
   /**
    * Resolve the viewer ID from an optional session cookie without throwing.
-   * Returns null when unauthenticated — safe to call on public endpoints.
+   * Returns null when unauthenticated â€” safe to call on public endpoints.
    * Fix #3: used by GET /feed to pass the real viewerId so likedByViewer is correct.
    */
   async resolveViewer(cookieHeader?: string): Promise<string | null> {
@@ -262,6 +267,8 @@ if (
         handle: users.handle,
         displayName: users.displayName,
         createdAt: users.createdAt,
+        sessionId: sessions.id,
+        tokenHash: sessions.tokenHash,
       })
       .from(sessions)
       .innerJoin(users, eq(sessions.userId, users.id))
@@ -332,5 +339,186 @@ async deactivate(userId: string): Promise<void> {
           isNull(sessions.revokedAt),
         ),
       );
+  }
+
+  parseUserAgent(userAgent?: string | null): {
+    browser: string;
+    os: string;
+    deviceType: 'desktop' | 'mobile' | 'tablet';
+  } {
+    const ua = userAgent || '';
+    let browser = 'Unknown Browser';
+    if (ua.includes('Firefox/')) {
+      browser = 'Firefox';
+    } else if (ua.includes('Edg/') || ua.includes('Edge/')) {
+      browser = 'Edge';
+    } else if (ua.includes('Chrome/') && ua.includes('Safari/')) {
+      browser = 'Chrome';
+    } else if (ua.includes('Safari/') && !ua.includes('Chrome/')) {
+      browser = 'Safari';
+    } else if (ua.includes('MSIE') || ua.includes('Trident/')) {
+      browser = 'Internet Explorer';
+    } else if (ua.includes('Opera/') || ua.includes('OPR/')) {
+      browser = 'Opera';
+    }
+
+    let os = 'Unknown OS';
+    if (ua.includes('Windows NT 10.0')) {
+      os = 'Windows 10/11';
+    } else if (ua.includes('Windows NT')) {
+      os = 'Windows';
+    } else if (ua.includes('iPhone')) {
+      os = 'iOS (iPhone)';
+    } else if (ua.includes('iPad')) {
+      os = 'iOS (iPad)';
+    } else if (ua.includes('Macintosh') || ua.includes('Mac OS X')) {
+      os = 'macOS';
+    } else if (ua.includes('Android')) {
+      os = 'Android';
+    } else if (ua.includes('Linux')) {
+      os = 'Linux';
+    }
+
+    let deviceType: 'desktop' | 'mobile' | 'tablet' = 'desktop';
+    if (ua.includes('iPad') || ua.includes('Tablet')) {
+      deviceType = 'tablet';
+    } else if (ua.includes('Mobile') || ua.includes('iPhone') || ua.includes('Android')) {
+      deviceType = 'mobile';
+    }
+
+    return { browser, os, deviceType };
+  }
+
+  async getSessions(userId: string, currentCookie?: string) {
+    const currentToken = this.readSessionToken(currentCookie);
+    const currentTokenHash = currentToken ? this.hashToken(currentToken) : null;
+    const now = new Date();
+
+    const activeSessions = await this.db
+      .select({
+        id: sessions.id,
+        createdAt: sessions.createdAt,
+        expiresAt: sessions.expiresAt,
+        userAgent: sessions.userAgent,
+        ipAddress: sessions.ipAddress,
+        tokenHash: sessions.tokenHash,
+      })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.userId, userId),
+          isNull(sessions.revokedAt),
+          gt(sessions.expiresAt, now),
+        ),
+      )
+      .orderBy(desc(sessions.createdAt));
+
+    const items = activeSessions.map((s: any) => {
+      const parsed = this.parseUserAgent(s.userAgent);
+      return {
+        id: s.id,
+        createdAt: s.createdAt,
+        expiresAt: s.expiresAt,
+        browser: parsed.browser,
+        os: parsed.os,
+        deviceType: parsed.deviceType,
+        ipAddress: s.ipAddress || null,
+        isCurrent: Boolean(currentTokenHash && s.tokenHash === currentTokenHash),
+      };
+    });
+
+    return {
+      items,
+      count: items.length,
+    };
+  }
+
+  async revokeSession(userId: string, sessionId: string, currentCookie?: string) {
+    const currentToken = this.readSessionToken(currentCookie);
+    const currentTokenHash = currentToken ? this.hashToken(currentToken) : null;
+    const now = new Date();
+
+    const [sessionToRevoke] = await this.db
+      .select({
+        id: sessions.id,
+        userId: sessions.userId,
+        tokenHash: sessions.tokenHash,
+        revokedAt: sessions.revokedAt,
+        expiresAt: sessions.expiresAt,
+      })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.id, sessionId),
+          eq(sessions.userId, userId),
+          isNull(sessions.revokedAt),
+          gt(sessions.expiresAt, now),
+        ),
+      )
+      .limit(1);
+
+    if (!sessionToRevoke) {
+      throw new NotFoundException('Session not found or already revoked');
+    }
+
+    await this.db
+      .update(sessions)
+      .set({ revokedAt: now })
+      .where(eq(sessions.id, sessionId));
+
+    const isCurrent = Boolean(
+      currentTokenHash && sessionToRevoke.tokenHash === currentTokenHash,
+    );
+
+    return {
+      revoked: true,
+      isCurrent,
+    };
+  }
+
+  async revokeOtherSessions(userId: string, currentCookie?: string) {
+    const currentToken = this.readSessionToken(currentCookie);
+    if (!currentToken) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    const currentTokenHash = this.hashToken(currentToken);
+    const now = new Date();
+
+    const [currentSession] = await this.db
+      .select({
+        id: sessions.id,
+      })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.tokenHash, currentTokenHash),
+          eq(sessions.userId, userId),
+          isNull(sessions.revokedAt),
+          gt(sessions.expiresAt, now),
+        ),
+      )
+      .limit(1);
+
+    if (!currentSession) {
+      throw new UnauthorizedException('Current session is invalid or expired');
+    }
+
+    // Revoke all active sessions for this user EXCEPT the current session tokenHash
+    const updated = await this.db
+      .update(sessions)
+      .set({ revokedAt: now })
+      .where(
+        and(
+          eq(sessions.userId, userId),
+          ne(sessions.tokenHash, currentTokenHash),
+          isNull(sessions.revokedAt),
+          gt(sessions.expiresAt, now),
+        ),
+      )
+      .returning({ id: sessions.id });
+
+    return {
+      revokedCount: (updated || []).length,
+    };
   }
 }

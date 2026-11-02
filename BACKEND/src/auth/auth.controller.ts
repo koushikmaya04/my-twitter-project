@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   Req,
   Res,
@@ -35,9 +37,19 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() body: { handle: string; password: string },
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const result = await this.authService.login(body);
+    const userAgent = request.headers['user-agent'] as string | undefined;
+    const ipAddress =
+      (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      request.ip ||
+      request.socket?.remoteAddress;
+
+    const result = await this.authService.login(body, {
+      userAgent,
+      ipAddress,
+    });
 
     response.cookie('session', result.token, {
       httpOnly: true,
@@ -77,6 +89,59 @@ async deactivate(
   return { item: { deactivated: true } };
 }
 
+
+  @Get('sessions')
+  @UseGuards(SessionGuard)
+  async getSessions(@Req() request: AuthenticatedRequest) {
+    return this.authService.getSessions(
+      request.user.id,
+      request.headers.cookie,
+    );
+  }
+
+  @Delete('sessions/:id')
+  @UseGuards(SessionGuard)
+  async revokeSession(
+    @Param('id') id: string,
+    @Req() request: AuthenticatedRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.authService.revokeSession(
+      request.user.id,
+      id,
+      request.headers.cookie,
+    );
+
+    if (result.isCurrent) {
+      response.clearCookie('session', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+      });
+    }
+
+    return {
+      item: {
+        revoked: true,
+        isCurrent: result.isCurrent,
+      },
+    };
+  }
+
+  @Post('sessions/revoke-others')
+  @UseGuards(SessionGuard)
+  @HttpCode(HttpStatus.OK)
+  async revokeOtherSessions(@Req() request: AuthenticatedRequest) {
+    const result = await this.authService.revokeOtherSessions(
+      request.user.id,
+      request.headers.cookie,
+    );
+
+    return {
+      item: result,
+    };
+  }
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
